@@ -1,0 +1,162 @@
+.pragma library
+.import "Base32.js" as Base32
+/*
+ * Copyright 2026 Herman van Hazendonk <github.com@herrie.org>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * Accounts as the app keeps them. Each has its secret in the key manager
+ * under its own name (secretKeyName), written once and never changed, and
+ * everything else - issuer, name, algorithm, digits, period, counter and
+ * the order - in an index, also in the key manager:
+ *
+ *     { "generation": 7, "accounts": [ { "id", "type", "issuer", "label",
+ *       "algorithm", "digits", "period", "counter" }, ... ] }
+ *
+ * The key manager will not overwrite a key, so the index goes in turn to
+ * one of two keys (INDEX_KEYS); the higher generation is the current one,
+ * and the other is the one before it, there if a write goes wrong half way.
+ */
+
+var INDEX_KEYS = ["otp.index.a", "otp.index.b"];
+
+function secretKeyName(id) {
+    return "otp.secret." + id;
+}
+
+// 64 random bits as hex: a name for the account's secret, not a secret.
+function newId() {
+    var id = "";
+    for (var i = 0; i < 16; i++)
+        id += Math.floor(Math.random() * 16).toString(16);
+    return id;
+}
+
+function isWholeNumber(v) {
+    return typeof v === "number" && isFinite(v) && Math.floor(v) === v;
+}
+
+/*
+ * What is wrong with an account's fields, by field: { secret: "...",
+ * label: "...", period: "...", counter: "..." }, empty when it can be
+ * saved. Editing an account, an empty secret keeps the stored one.
+ */
+function problems(fields, editing) {
+    var out = {};
+    var secret = fields.secret === undefined ? "" : String(fields.secret);
+    if (!(editing && secret.trim() === "")) {
+        var p = Base32.problem(secret);
+        if (p !== "")
+            out.secret = p;
+    }
+    if (String(fields.issuer || "").trim() === "" && String(fields.label || "").trim() === "")
+        out.label = "Give the account a name, or the site's.";
+    if (fields.type === "totp" && !(isWholeNumber(fields.period) && fields.period >= 1 && fields.period <= 3600))
+        out.period = "The code changes every 1 to 3600 seconds; 30 is usual.";
+    if (fields.type === "hotp" && !(isWholeNumber(fields.counter) && fields.counter >= 0
+                                    && fields.counter <= 9007199254740991))
+        out.counter = "The counter is a whole number from 0.";
+    return out;
+}
+
+// The stored part of an account (everything but the secret), tidied.
+function metaFrom(fields, id) {
+    return {
+        id: id,
+        type: fields.type === "hotp" ? "hotp" : "totp",
+        issuer: String(fields.issuer || "").trim(),
+        label: String(fields.label || "").trim(),
+        algorithm: fields.algorithm || "SHA1",
+        digits: fields.digits || 6,
+        period: fields.type === "hotp" ? 30 : (fields.period || 30),
+        counter: fields.type === "hotp" ? (fields.counter || 0) : 0
+    };
+}
+
+function validMeta(a) {
+    return a && typeof a.id === "string" && /^[0-9a-zA-Z]+$/.test(a.id)
+            && (a.type === "totp" || a.type === "hotp")
+            && typeof a.issuer === "string" && typeof a.label === "string"
+            && (a.algorithm === "SHA1" || a.algorithm === "SHA256" || a.algorithm === "SHA512")
+            && (a.digits === 6 || a.digits === 7 || a.digits === 8)
+            && isWholeNumber(a.period) && a.period >= 1
+            && isWholeNumber(a.counter) && a.counter >= 0;
+}
+
+function serializeIndex(generation, accounts) {
+    return JSON.stringify({ generation: generation, accounts: accounts.map(function(a) {
+        return metaFrom(a, a.id);
+    }) });
+}
+
+// The index from its stored text, or null when it is not one.
+function parseIndex(text) {
+    var index;
+    try {
+        index = JSON.parse(text);
+    } catch (e) {
+        return null;
+    }
+    if (!index || !isWholeNumber(index.generation) || !Array.isArray(index.accounts))
+        return null;
+    for (var i = 0; i < index.accounts.length; i++) {
+        if (!validMeta(index.accounts[i]))
+            return null;
+    }
+    return { generation: index.generation, accounts: index.accounts };
+}
+
+function newerIndex(a, b) {
+    if (!a)
+        return b || null;
+    if (!b)
+        return a;
+    return b.generation > a.generation ? b : a;
+}
+
+// The list with the item at `from` moved to `to`; unchanged when either is
+// out of range.
+function moved(list, from, to) {
+    var out = list.slice(0);
+    if (from < 0 || from >= out.length || to < 0 || to >= out.length)
+        return out;
+    var item = out.splice(from, 1)[0];
+    out.splice(to, 0, item);
+    return out;
+}
+
+function title(account) {
+    return account.issuer !== "" ? account.issuer : account.label;
+}
+
+function subtitle(account) {
+    return account.issuer !== "" ? account.label : "";
+}
+
+// Already there: the same name and the same key.
+function isDuplicate(accounts, fields, secret, secretsById) {
+    var issuer = String(fields.issuer || "").trim().toLowerCase();
+    var label = String(fields.label || "").trim().toLowerCase();
+    var key = Base32.normalize(secret);
+    for (var i = 0; i < accounts.length; i++) {
+        var a = accounts[i];
+        if (a.issuer.toLowerCase() === issuer && a.label.toLowerCase() === label
+                && secretsById[a.id] === key)
+            return true;
+    }
+    return false;
+}
