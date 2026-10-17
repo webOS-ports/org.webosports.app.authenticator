@@ -52,10 +52,11 @@ TestCase {
     }
 
     // Stored accounts, as the app writes them.
-    function seed(accounts, secrets, generation, slot, lock) {
+    function seed(accounts, secrets, generation, slot, lock, face) {
         var keys = Object.assign({}, keymanager.keys);
         keys[Accounts.INDEX_KEYS[slot || 0]] = {
-            keydata: Accounts.serializeIndex(generation || 1, accounts, lock === true), type: "ASCIIBLOB",
+            keydata: Accounts.serializeIndex(generation || 1, accounts, { lock: lock === true, face: face === true }),
+            type: "ASCIIBLOB",
             nohide: true, noexport: true
         };
         for (var id in secrets)
@@ -623,7 +624,7 @@ TestCase {
         createApp();
         app.appMenu.popup(0, 0);
         tryVerify(function() { return app.appMenu.opened; });
-        compare(app.appMenu.count, 4);
+        compare(app.appMenu.count, 5);
         mouseClick(app.appMenu.itemAt(2));
         verify(page().reordering);
     }
@@ -815,7 +816,7 @@ TestCase {
         auth.fingerprints = ["right-index"];
         createLocked();
         tryVerify(function() { return auth.armed() === 1; });
-        verify(/Touch the fingerprint sensor, or enter/.test(lockMessage()));
+        compare(lockMessage(), "Touch the fingerprint sensor or enter the screen lock PIN.");
         auth.touch(true);
         tryCompare(app.store, "status", "ready");
         compare(findChild(row(0), "codeLabel").text, "9428 7082");
@@ -948,6 +949,204 @@ TestCase {
         backGesture();
         compare(app.store.status, "locked");
         verify(lockScreen().visible);
+    }
+
+    // --- face ----------------------------------------------------------
+
+    function faceItem() {
+        return findChild(app.appMenu.contentItem, "faceMenuItem") || app.appMenu.itemAt(4);
+    }
+
+    // Until the n-th face identify has been asked for.
+    function waitForFaceAttempt(n) {
+        tryVerify(function() { return auth.countOf("face:identify") === n; }, 3000, "face attempt " + n);
+    }
+
+    // A locked app with face turned on and enrolled.
+    function createFaceLocked() {
+        makeAuth();
+        auth.faceEnrolled = true;
+        makeKeymanager();
+        seed([account("a1", "Example", "me", { digits: 8 })], { a1: rfcSecret }, 1, 0, true, true);
+        createApp(59000, undefined, undefined, false);
+        tryCompare(app.store, "status", "locked");
+        tryCompare(app.deviceAuth, "lockMode", "pin");
+        app.deviceAuth.faceGapMs = 10;
+    }
+
+    function test_face_offered_only_where_enrolled_and_locked() {
+        makeAuth();
+        makeKeymanager();
+        seed([account("a1", "Example", "me")], { a1: rfcSecret });
+        createApp();
+        tryCompare(app.deviceAuth, "lockMode", "pin");
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        verify(!faceItem().visible);
+        auth.faceEnrolled = true;
+        tryCompare(app.deviceAuth, "faceEnrolled", true);
+        // Not without the lock.
+        verify(!faceItem().visible);
+        app.appMenu.close();
+        app.toggleLock();
+        tryCompare(app.store, "lockEnabled", true);
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        verify(faceItem().visible);
+        compare(faceItem().text, "Also open with a face");
+        app.appMenu.close();
+    }
+
+    function test_face_asks_first_and_says_why() {
+        makeAuth();
+        auth.faceEnrolled = true;
+        makeKeymanager();
+        seed([account("a1", "Example", "me")], { a1: rfcSecret }, 1, 0, true);
+        createLocked();
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+        var dialog = findChild(app.contentItem, "faceDialog");
+        app.toggleFace();
+        verify(dialog.visible);
+        verify(/good photo of you/.test(dialog.message));
+        dialog.rejected();
+        verify(!dialog.visible);
+        verify(!app.store.faceEnabled);
+        app.toggleFace();
+        dialog.accepted();
+        tryCompare(app.store, "faceEnabled", true);
+        verify(storedIndex().face);
+        compare(app.toast, "Opened with a face too");
+        app.toggleFace();
+        tryCompare(app.store, "faceEnabled", false);
+        verify(!storedIndex().face);
+    }
+
+    function test_lock_off_takes_face_with_it() {
+        createFaceLocked();
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+        verify(app.store.faceEnabled);
+        app.toggleLock();
+        tryCompare(app.store, "lockEnabled", false);
+        verify(!app.store.faceEnabled);
+        verify(!storedIndex().face);
+    }
+
+    // Enrolled, but not turned on in the app: the camera is left alone.
+    function test_face_not_used_unless_turned_on() {
+        makeAuth();
+        auth.faceEnrolled = true;
+        createLocked();
+        tryCompare(app.deviceAuth, "faceEnrolled", true);
+        wait(50);
+        compare(auth.countOf("face:identify"), 0);
+        verify(!/look at the screen/i.test(lockMessage()));
+        verify(!findChild(lockScreen(), "faceAgainButton").visible);
+    }
+
+    function test_face_opens_the_lock() {
+        createFaceLocked();
+        tryVerify(function() { return auth.faceArmed() === 1; });
+        compare(lockMessage(), "Look at the screen or enter the screen lock PIN.");
+        compare(findChild(lockScreen(), "faceStatus").text, "Looking for your face\u2026");
+        auth.face({ returnValue: true, scanning: true });
+        tryCompare(findChild(lockScreen(), "faceStatus"), "text", "Checking\u2026");
+        auth.face({ returnValue: true, recognized: true });
+        tryCompare(app.store, "status", "ready");
+        compare(findChild(row(0), "codeLabel").text, "9428 7082");
+    }
+
+    function test_face_fingerprint_and_pin_together() {
+        makeAuth();
+        auth.fingerprints = ["right-index"];
+        auth.faceEnrolled = true;
+        makeKeymanager();
+        seed([account("a1", "Example", "me")], { a1: rfcSecret }, 1, 0, true, true);
+        createApp(59000, undefined, undefined, false);
+        tryCompare(app.store, "status", "locked");
+        tryVerify(function() { return auth.armed() === 1 && auth.faceArmed() === 1; });
+        compare(lockMessage(), "Look at the screen, touch the fingerprint sensor, or enter the screen lock PIN.");
+        auth.touch(true);
+        tryCompare(app.store, "status", "ready");
+        // The camera let go as well.
+        tryVerify(function() { return auth.faceArmed() === 0; });
+        verify(auth.countOf("face:abort") >= 1);
+    }
+
+    // A few attempts, then the camera is left alone until asked.
+    function test_face_tries_are_few() {
+        createFaceLocked();
+        for (var i = 0; i < 3; i++) {
+            waitForFaceAttempt(i + 1);
+            auth.face({ returnValue: true, recognized: false, reason: "notRecognized" });
+            tryCompare(app.deviceAuth, "faceTries", i + 1);
+        }
+        wait(50);
+        compare(auth.faceArmed(), 0);
+        compare(auth.countOf("face:identify"), 3);
+        compare(findChild(lockScreen(), "faceStatus").text, "The face was not recognised.");
+        var again = findChild(lockScreen(), "faceAgainButton");
+        verify(again.visible);
+        mouseClick(again);
+        tryVerify(function() { return auth.faceArmed() === 1; });
+        compare(app.deviceAuth.faceMisses, 3);
+    }
+
+    function test_no_face_is_not_a_miss() {
+        createFaceLocked();
+        tryVerify(function() { return auth.faceArmed() === 1; });
+        auth.face({ returnValue: true, recognized: false, reason: "noFace" });
+        tryCompare(findChild(lockScreen(), "faceStatus"), "text", "No face seen.");
+        compare(app.deviceAuth.faceMisses, 0);
+        compare(app.store.status, "locked");
+    }
+
+    function test_face_misses_leave_the_passcode() {
+        createFaceLocked();
+        for (var i = 0; i < 5; i++) {
+            if (i === 3)
+                app.deviceAuth.tryFaceAgain();
+            waitForFaceAttempt(i + 1);
+            auth.face({ returnValue: true, recognized: false, reason: "notRecognized" });
+            tryCompare(app.deviceAuth, "faceMisses", i + 1);
+        }
+        compare(lockMessage(), "Too many tries with the face; use the passcode.");
+        verify(!findChild(lockScreen(), "faceAgainButton").visible);
+        // Coming back does not give more.
+        app.inFront = false;
+        app.inFront = true;
+        wait(50);
+        compare(auth.faceArmed(), 0);
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+    }
+
+    // The Camera app holds the camera: the passcode, without a fuss.
+    function test_face_camera_busy() {
+        createFaceLocked();
+        tryVerify(function() { return auth.faceArmed() === 1; });
+        auth.face({ returnValue: false, state: "unavailable", errorText: "camera busy" });
+        tryCompare(findChild(lockScreen(), "faceStatus"), "text", "Face unlock cannot be used just now.");
+        wait(50);
+        compare(auth.countOf("face:identify"), 1);
+        compare(app.deviceAuth.faceMisses, 0);
+        verify(findChild(lockScreen(), "faceAgainButton").visible);
+        // Back in front, it is tried again.
+        app.inFront = false;
+        app.inFront = true;
+        tryVerify(function() { return auth.faceArmed() === 1; });
+    }
+
+    function test_face_disarmed_in_the_background() {
+        createFaceLocked();
+        tryVerify(function() { return auth.faceArmed() === 1; });
+        app.inFront = false;
+        tryVerify(function() { return auth.faceArmed() === 0; });
+        verify(auth.countOf("face:abort") >= 1);
     }
 
     function test_lock_layout_data() {

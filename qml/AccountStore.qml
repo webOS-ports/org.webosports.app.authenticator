@@ -50,6 +50,8 @@ QtObject {
     // Whether the app asks for a fingerprint or the passcode first; from
     // the index, so it is as safe from change as the accounts are.
     property bool lockEnabled: false
+    // A face opens it too; only with lockEnabled.
+    property bool faceEnabled: false
     // A change that could not be saved, in words; "" when none.
     signal saveFailed(string message)
 
@@ -161,6 +163,7 @@ QtObject {
         }
         var index = Accounts.newerIndex(results[0], results[1]);
         lockEnabled = index !== null && index.lock;
+        faceEnabled = index !== null && index.face;
         if (lockEnabled && !_unlocked) {
             _generation = index.generation;
             _currentSlot = index === results[0] ? 0 : 1;
@@ -257,9 +260,18 @@ QtObject {
 
     /*
      * Turns the lock on or off: a new generation of the index with the
-     * same accounts. callback(error).
+     * same accounts. Off, face goes off with it. callback(error).
      */
     function setLockEnabled(on, callback) {
+        _setOptions({ lock: on, face: on && faceEnabled }, callback);
+    }
+
+    // Lets a face open the lock too, or stops it.
+    function setFaceEnabled(on, callback) {
+        _setOptions({ lock: lockEnabled, face: on && lockEnabled }, callback);
+    }
+
+    function _setOptions(options, callback) {
         if (!_ready(callback))
             return;
         _enqueue(function(next) {
@@ -267,7 +279,8 @@ QtObject {
                 if (error !== "") {
                     _report("The change could not be saved: " + error, callback);
                 } else {
-                    lockEnabled = on;
+                    lockEnabled = options.lock;
+                    faceEnabled = options.face;
                     // Turned on from inside the app: it stays open until it
                     // is next locked.
                     _unlocked = true;
@@ -275,16 +288,16 @@ QtObject {
                         callback("");
                 }
                 next();
-            }, on);
+            }, options);
         });
     }
 
     /*
      * Writes the next generation of the index, with `list`, into the key
      * that does not hold the current one: removes what is there, then
-     * stores. done(error). `lock` is the new lockEnabled, when it changes.
+     * stores. done(error). `options` ({ lock, face }) when they change.
      */
-    function _writeIndex(list, done, lock) {
+    function _writeIndex(list, done, options) {
         var slot = _currentSlot === 0 ? 1 : 0;
         var name = Accounts.INDEX_KEYS[slot];
         var generation = _generation + 1;
@@ -296,7 +309,7 @@ QtObject {
             _call("store", {
                 "keyname": name,
                 "keydata": Accounts.serializeIndex(generation, list,
-                                                   lock === undefined ? lockEnabled : lock),
+                                                   options || { lock: lockEnabled, face: faceEnabled }),
                 "type": "ASCIIBLOB",
                 "nohide": true,
                 "noexport": true

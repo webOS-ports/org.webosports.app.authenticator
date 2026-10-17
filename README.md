@@ -22,8 +22,9 @@ RFC 6238) and counter-based (HOTP, RFC 4226).
 - The back gesture leaves the editor, closes a dialog and ends reordering.
 - "Lock with fingerprint or passcode" in the app menu: from then on the
   app asks for an enrolled fingerprint or the screen lock passcode when
-  it opens, and again after a minute in the background. See
-  [The lock](#the-lock).
+  it opens, and again after a minute in the background. With the lock on
+  and a face enrolled in Settings, "Also open with a face" lets a face
+  open it too, after a warning. See [The lock](#the-lock).
 
 ## Screenshots
 
@@ -83,6 +84,19 @@ screen takes it.
   screen's, and share its lockout: after five, 30 seconds, then doubling.
   Under an Exchange policy with a retry limit, they also count towards
   that policy's wipe.
+- A face, only when turned on ("Also open with a face", offered where a
+  face is enrolled), through `com.webos.service.faceunlock`
+  (luneos-faced). It is weaker than the others: the front camera sees
+  only a picture, with no depth or infrared, and luneos-faced calls itself
+  Android's "Class 1 / Convenience" tier. Someone who looks like you, or
+  a good photo, can sometimes pass, so the app asks first and says so.
+  Each try holds the camera for a few seconds, so there are at most three
+  each time the app comes to the front, 2.5 seconds apart; "Try face
+  again" gives three more. Five faces that do not match leave only the
+  passcode, until the lock is next shown. An empty frame is not counted.
+  If the Camera app holds the camera, the app says face unlock cannot be
+  used just now and leaves it until asked again. Turning the lock off
+  turns face off with it.
 - The lock can only be turned on while the device has a screen lock
   passcode, so a sensor that stops working never shuts you out. If the
   passcode is removed later, the app says to set one in Screen & Lock
@@ -90,7 +104,8 @@ screen takes it.
 - Locked, the app lets go of the secrets and the list and leaves any
   open page. A change being saved is finished first. An otpauth:// link
   that comes while it is locked opens once it is unlocked.
-- Whether the lock is on is kept in the index (`"lock": true`), so it is
+- Whether the lock is on is kept in the index (`"lock": true`, and
+  `"face": true` with it), so it is
   as safe from change as the accounts are. An older version of the app
   leaves the flag out the next time it writes the index, which turns the
   lock off.
@@ -101,9 +116,11 @@ fingerprint. Whoever can read them without the lock (root, or a caller
 allowed to name the app id) still can. The lock is for the device in
 someone else's hand, unlocked. The fingerprint count starts over each
 time the app is opened; one count across all of the device's factors is
-luna-authmanager's to keep, and it does not do that yet.
-webos-fingerprint-adapter sends identify results to every subscriber,
-which is why the sensor is disarmed whenever the app is not in front.
+luna-authmanager's to keep, and it does not do that yet. The same goes
+for face. webos-fingerprint-adapter and luneos-faced send identify
+results to every subscriber, which is why the sensor and the camera are
+let go whenever the app is not in front, and why a reply for an identify
+the app has already let go of is ignored.
 
 ## Permissions
 
@@ -119,6 +136,9 @@ which is why the sensor is disarmed whenever the app is not in front.
 - `fingerprint.identify`: the sensor's status, `identify` and `abort`,
   without enrolling or removing fingerprints. A new group, on
   webos-fingerprint-adapter's `herrie/identify-group` branch.
+- `faceunlock.identify`: the same for a face, without enrolling or
+  clearing it. A new group, on luneos-faced's `herrie/identify-group`
+  branch.
 
 `"mimeTypes": [{ "scheme": "otpauth" }]` registers the app for
 otpauth:// links; it is opened with `{"target": "otpauth://..."}`.
@@ -159,9 +179,13 @@ It builds an "Architecture: all" ipk and installs it through
   refused check; no passcode set; a fingerprint that matches, misses,
   times out and is disarmed in the background; locking again after a
   minute away and while a change is being saved; links while locked; the
-  lock screen's layout.
+  lock screen's layout. Face: offered only with the lock and an enrolled
+  face; asked first; off with the lock; never used unless turned on; a
+  match; face, fingerprint and PIN together; three tries and "Try face
+  again"; an empty frame not counted; five misses; a busy camera; let go
+  in the background.
 
-`tools/mutation-check.sh` breaks the code in 33 ways, one at a time (the
+`tools/mutation-check.sh` breaks the code in 44 ways, one at a time (the
 hashes, the truncation, Base32, the index, the order of writes, the back
 gesture, the lock and more), and checks that the tests fail for each.
 
@@ -201,7 +225,7 @@ architecture-specific files. RDEPENDS: qml-runner, luneos-components
 (LuneOS.Forms, LuneOS.Components, LuneOS.Service, LuneOS.System,
 LuneOS.Passcode), Qt Quick Controls, Qt Quick Shapes, the key manager and
 luna-authmanager; webos-fingerprint-adapter where the device has a
-sensor.
+sensor, and luneos-faced where face unlock is wanted.
 
 ## Licence
 

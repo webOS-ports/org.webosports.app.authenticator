@@ -24,6 +24,7 @@ import LunaNext.Common 0.1
 import LuneOS.Service 1.0
 import LuneOS.System 1.0
 import LuneOS.Forms 1.0
+import LuneOS.Components 1.0
 
 import "js/OtpAuthUri.js" as OtpAuthUri
 
@@ -108,6 +109,7 @@ AppWindow {
         id: deviceAuth
         bus: appWindow.authBus
         listening: appWindow.locked && accountStore.status === "locked" && appWindow.inFront
+        faceAllowed: accountStore.faceEnabled
     }
 
     // Leaves the pages and lets go of the secrets.
@@ -142,8 +144,22 @@ AppWindow {
         if (backgroundSince > 0 && lockClock() - backgroundSince >= relockAfterMs)
             lock();
         backgroundSince = 0;
-        if (locked)
+        if (locked) {
+            deviceAuth.cameBack();
             lockScreen.focusEntry();
+        }
+    }
+
+    // Face is asked about first: it is weaker, and the dialog says so.
+    function toggleFace() {
+        if (accountStore.faceEnabled) {
+            accountStore.setFaceEnabled(false, function(error) {
+                if (error === "")
+                    showToast("No longer opened with a face");
+            });
+            return;
+        }
+        faceDialog.visible = true;
     }
 
     function toggleLock() {
@@ -274,6 +290,16 @@ AppWindow {
             enabled: accountStore.status === "ready"
             onTriggered: appWindow.toggleLock()
         }
+        // Only where a face is enrolled, or it is on already.
+        MenuItem {
+            objectName: "faceMenuItem"
+            text: accountStore.faceEnabled ? "Stop opening with a face" : "Also open with a face"
+            visible: accountStore.lockEnabled
+                     && (accountStore.faceEnabled || (deviceAuth.faceAvailable && deviceAuth.faceEnrolled))
+            height: visible ? implicitHeight : 0
+            enabled: accountStore.status === "ready"
+            onTriggered: appWindow.toggleFace()
+        }
     }
 
     // Under the header: trouble, until dismissed.
@@ -296,6 +322,27 @@ AppWindow {
                 appWindow.notice = "";
             }
         }
+    }
+
+    ConfirmDialog {
+        id: faceDialog
+        objectName: "faceDialog"
+        parent: appWindow.contentItem
+        visible: false
+        title: "Open with a face?"
+        message: "A face is weaker than the passcode: the camera sees only a picture, so someone who "
+                 + "looks like you, or a good photo of you, can sometimes pass. Anyone who opens the "
+                 + "app can see and copy your codes."
+        dialogHeight: Units.gu(30)
+        dialogWidth: Math.min(Units.gu(40), appWindow.width - Units.gu(4))
+        onAccepted: {
+            visible = false;
+            accountStore.setFaceEnabled(true, function(error) {
+                if (error === "")
+                    appWindow.showToast("Opened with a face too");
+            });
+        }
+        onRejected: visible = false
     }
 
     LockScreen {

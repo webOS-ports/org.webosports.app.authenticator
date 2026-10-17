@@ -23,9 +23,10 @@ import LunaNext.Common 0.1
 import LuneOS.Passcode 1.0
 
 /*
- * Over the whole window while the app is locked: a fingerprint, or the
- * screen lock passcode, entered the way the lock screen takes it (PIN pad,
- * password or pattern). Nothing under it can be touched.
+ * Over the whole window while the app is locked: a fingerprint, a face
+ * when turned on, or the screen lock passcode, entered the way the lock
+ * screen takes it (PIN pad, password or pattern). Nothing under it can be
+ * touched.
  */
 Rectangle {
     id: lockScreen
@@ -70,18 +71,27 @@ Rectangle {
     function prompt() {
         if (!auth || auth.lockMode === "")
             return "Checking the screen lock…";
-        var finger = auth.fingerprintActive ? "Touch the fingerprint sensor, or " : "";
-        switch (auth.lockMode) {
-        case "pin":
-            return finger + (finger ? "enter" : "Enter") + " the screen lock PIN.";
-        case "password":
-            return finger + (finger ? "enter" : "Enter") + " the screen lock password.";
-        case "pattern":
-            return finger + (finger ? "draw" : "Draw") + " the screen lock pattern.";
+        var ways = [];
+        if (auth.faceReady)
+            ways.push("look at the screen");
+        if (auth.fingerprintActive)
+            ways.push("touch the fingerprint sensor");
+        var passcode = { "pin": "enter the screen lock PIN", "password": "enter the screen lock password",
+                         "pattern": "draw the screen lock pattern" }[auth.lockMode];
+        if (passcode === undefined) {
+            // No passcode to fall back on.
+            var others = ways.length > 0 ? _sentence(ways) + " " : "";
+            return others + "No screen lock passcode is set; set one in Screen & Lock, then enter it here.";
         }
-        // No passcode to fall back on.
-        return (auth.fingerprintActive ? "Touch the fingerprint sensor. " : "")
-                + "No screen lock passcode is set; set one in Screen & Lock, then enter it here.";
+        ways.push(passcode);
+        return _sentence(ways);
+    }
+
+    // ["a", "b", "c"] as "A, b, or c."
+    function _sentence(ways) {
+        var text = ways.length === 1 ? ways[0]
+                 : ways.slice(0, -1).join(", ") + (ways.length > 2 ? "," : "") + " or " + ways[ways.length - 1];
+        return text.charAt(0).toUpperCase() + text.slice(1) + ".";
     }
 
     function waitText(seconds) {
@@ -130,6 +140,16 @@ Rectangle {
             lockScreen.message = lockScreen.auth.fingerprintMisses >= lockScreen.auth.maxFingerprintMisses
                     ? "Too many tries with the fingerprint; use the passcode."
                     : "The fingerprint was not recognised.";
+        }
+        function onFaceMatched() {
+            lockScreen.message = "";
+            lockScreen.unlocked();
+        }
+        function onFaceMissed() {
+            if (lockScreen.auth.faceMisses >= lockScreen.auth.maxFaceMisses) {
+                lockScreen.messageIsError = true;
+                lockScreen.message = "Too many tries with the face; use the passcode.";
+            }
         }
     }
 
@@ -202,6 +222,27 @@ Rectangle {
                 color: lockScreen.lockedOut || lockScreen.messageIsError ? "#ff8a80" : "#d0d0d0"
                 text: lockScreen.lockedOut ? lockScreen.waitText(lockScreen.lockoutLeft)
                     : lockScreen.message !== "" ? lockScreen.message : lockScreen.prompt()
+            }
+
+            // What the camera is doing.
+            Label {
+                objectName: "faceStatus"
+                x: Units.gu(2)
+                width: parent.width - Units.gu(4)
+                visible: text !== ""
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                color: "#a0c8f0"
+                text: lockScreen.auth ? lockScreen.auth.faceStatus : ""
+            }
+            Button {
+                objectName: "faceAgainButton"
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: lockScreen.auth !== null && lockScreen.auth.faceReady && lockScreen.auth.listening
+                         && !lockScreen.auth.faceActive
+                width: Math.min(Units.gu(20), lockScreen.width - Units.gu(4))
+                text: "Try face again"
+                onClicked: lockScreen.auth.tryFaceAgain()
             }
 
             // PIN: dots for what is typed, and the pad.

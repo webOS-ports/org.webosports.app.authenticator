@@ -20,13 +20,14 @@ import QtQuick
 
 /*
  * Who is holding the device: a fingerprint, through
- * com.webos.service.fingerprint (webos-fingerprint-adapter, biomd), or the
- * screen lock passcode, through com.webos.service.auth (luna-authmanager).
- * The passcode is checked there, against the same count of wrong tries and
- * the same lockout as the lock screen's.
+ * com.webos.service.fingerprint (webos-fingerprint-adapter, biomd), a face
+ * when faceAllowed, through com.webos.service.faceunlock (luneos-faced), or
+ * the screen lock passcode, through com.webos.service.auth
+ * (luna-authmanager). The passcode is checked there, against the same
+ * count of wrong tries and the same lockout as the lock screen's.
  *
  * Needs "auth.query" (the lock mode), "auth.verify" (matching the
- * passcode) and "fingerprint.identify".
+ * passcode), "fingerprint.identify" and "faceunlock.identify".
  *
  * bus: anything with LunaService's call() and subscribe(). The tests give
  * it a stand-in.
@@ -59,8 +60,37 @@ QtObject {
     signal fingerprintMatched()
     signal fingerprintMissed()
 
+    /*
+     * A face: weaker than the others (an RGB camera only; a good photo can
+     * pass), so only when the user turned it on. Each identify is one
+     * attempt of a few seconds that holds the camera, so there are at most
+     * maxFaceTries of them, faceGapMs apart, each time the app comes to the
+     * front; tryFaceAgain() gives more. Only a face that did not match
+     * counts as a miss, not an empty frame.
+     */
+    property bool faceAllowed: false
+    property bool faceAvailable: false
+    property bool faceEnrolled: false
+    readonly property bool faceReady: faceAllowed && faceAvailable && faceEnrolled
+                                      && faceMisses < maxFaceMisses
+    property int faceMisses: 0
+    readonly property int maxFaceMisses: 5
+    property int faceTries: 0
+    readonly property int maxFaceTries: 3
+    property int faceGapMs: 2500
+    // The camera could not be had (the Camera app holds it): not tried
+    // again until asked, or until the app comes back to the front.
+    property bool faceBlocked: false
+    readonly property bool faceActive: listening && faceReady && faceTries < maxFaceTries && !faceBlocked
+    // What the camera is doing, in words; "" when nothing to say.
+    property string faceStatus: ""
+
+    signal faceMatched()
+    signal faceMissed()
+
     readonly property string authService: "luna://com.webos.service.auth/"
     readonly property string fingerprintService: "luna://com.webos.service.fingerprint/"
+    readonly property string faceService: "luna://com.webos.service.faceunlock/"
 
     property var _lockModeCall: null
     property var _statusCall: null
@@ -79,6 +109,12 @@ QtObject {
         interval: 1200
     }
 
+    property var _faceCall: null
+    property var _faceGap: Timer {
+        interval: auth.faceGapMs
+        onTriggered: auth._armFace()
+    }
+
     Component.onCompleted: watch()
 
     onFingerprintActiveChanged: {
@@ -86,6 +122,13 @@ QtObject {
             _arm();
         else
             _disarm();
+    }
+
+    onFaceActiveChanged: {
+        if (faceActive)
+            _armFace();
+        else
+            _disarmFace();
     }
 
     function _parse(message) {
@@ -125,19 +168,131 @@ QtObject {
             // No sensor, or no fingerprint service on this device.
             fingerprintAvailable = false;
         });
+        if (_faceStatusCall)
+            _faceStatusCall.cancel();
+        _faceStatusCall = bus.subscribe(faceService + "getStatus", '{"subscribe":true}',
+                                        function(message) {
+            var reply = _parse(message);
+            if (!reply || reply.returnValue === false) {
+                faceAvailable = false;
+                return;
+            }
+            faceAvailable = reply.available === true;
+            faceEnrolled = reply.enrolled === true;
+        }, function(error) {
+            // No face unlock on this device.
+            faceAvailable = false;
+        });
     }
 
-    // The lock is shown anew: a full count of fingerprint tries.
+    property var _faceStatusCall: null
+
+    // The lock is shown anew: a full count of fingerprint and face tries.
     function reset() {
         fingerprintMisses = 0;
         _identifyErrors = 0;
+        faceMisses = 0;
+        cameBack();
+    }
+
+    // Back in front: the camera may be tried again, the misses stay.
+    function cameBack() {
+        faceTries = 0;
+        faceBlocked = false;
+        faceStatus = "";
+    }
+
+    function tryFaceAgain() {
+        cameBack();
+    }
+
+    function _armFace() {
+        if (_faceCall || !faceActive || !bus)
+            return;
+        // The camera takes a moment to start; say so, or it looks broken.
+        faceStatus = "Looking for your face\u2026";
+        var call = bus.subscribe(faceService + "identify", '{"subscribe":true}',
+                                 function(message) { if (_faceCall === call) _faceReply(message); },
+                                 function(error) { if (_faceCall === call) _faceError(error); });
+        _faceCall = call;
+    }
+
+    function _disarmFace() {
+        _faceGap.stop();
+        if (_faceCall) {
+            var call = _faceCall;
+            _faceCall = null;
+            call.cancel();
+            // The camera released, not left streaming.
+            bus.call(faceService + "abort", "{}", function() {}, function() {});
+            faceStatus = "";
+        }
+    }
+
+    function _endFace() {
+        var call = _faceCall;
+        _faceCall = null;
+        if (call)
+            Qt.callLater(function() { call.cancel(); });
+    }
+
+    function _faceReply(message) {
+        var reply = _parse(message);
+        if (!reply)
+            return;
+        if (reply.scanning === true) {
+            faceStatus = "Checking\u2026";
+            return;
+        }
+        if (reply.recognized === true) {
+            _endFace();
+            faceStatus = "";
+            faceMatched();
+            return;
+        }
+        if (reply.recognized === false) {
+            _endFace();
+            var reason = reply.reason || "";
+            if (reason === "notEnrolled") {
+                faceEnrolled = false;
+                faceStatus = "";
+                return;
+            }
+            faceStatus = reason === "noFace" ? "No face seen."
+                       : reason === "multipleFaces" ? "More than one face seen."
+                       : reason === "aborted" ? ""
+                       : "The face was not recognised.";
+            // An empty frame is someone not looking yet, not a try.
+            if (reason !== "noFace" && reason !== "aborted") {
+                faceMisses++;
+                faceMissed();
+            }
+            if (reason !== "aborted")
+                faceTries++;
+            if (faceActive)
+                _faceGap.restart();
+            return;
+        }
+        if (reply.returnValue === false)
+            _faceError(reply.errorText || "refused");
+    }
+
+    function _faceError(error) {
+        console.warn("Authenticator: face: " + error);
+        _endFace();
+        faceBlocked = true;
+        faceStatus = "Face unlock cannot be used just now.";
     }
 
     function _arm() {
         if (_identifyCall || !fingerprintActive || !bus)
             return;
-        _identifyCall = bus.subscribe(fingerprintService + "identify", '{"subscribe":true}',
-                                      _identifyReply, _identifyError);
+        // A reply for a call let go of (cancelled, not yet gone) is not
+        // this one's.
+        var call = bus.subscribe(fingerprintService + "identify", '{"subscribe":true}',
+                                 function(message) { if (_identifyCall === call) _identifyReply(message); },
+                                 function(error) { if (_identifyCall === call) _identifyError(error); });
+        _identifyCall = call;
     }
 
     function _disarm() {

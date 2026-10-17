@@ -6,14 +6,17 @@
 import QtQuick
 
 /*
- * com.webos.service.auth and com.webos.service.fingerprint, answering as
- * luna-authmanager and webos-fingerprint-adapter do, for main.qml's
- * authBus.
+ * com.webos.service.auth, com.webos.service.fingerprint and
+ * com.webos.service.faceunlock, answering as luna-authmanager,
+ * webos-fingerprint-adapter and luneos-faced do, for main.qml's authBus.
+ * The face service's methods are recorded as "face:<method>".
  *
  * Knobs: lockMode and passcode; fingerprints (names; empty for none) and
  * available; lockoutAfter wrong passcodes, then lockedOut answers;
  * denyMatch answers matchDevicePasscode as ls-hubd does for a caller
  * without the group. touch(matched) is a finger on the sensor.
+ * faceAvailable and faceEnrolled; face(payload) answers the running face
+ * identify, as luneos-faced does at the end of its attempt.
  */
 QtObject {
     id: fake
@@ -24,12 +27,16 @@ QtObject {
     property bool available: true
     property int lockoutAfter: 5
     property bool denyMatch: false
+    property bool faceAvailable: true
+    property bool faceEnrolled: false
 
     property var calls: []
     property int wrong: 0
     property var _lockModeSubs: []
     property var _statusSubs: []
     property var _identifySubs: []
+    property var _faceStatusSubs: []
+    property var _faceSubs: []
 
     function countOf(method) {
         return calls.filter(function(c) { return c.method === method; }).length;
@@ -44,7 +51,14 @@ QtObject {
         Qt.callLater(function() { callback({ payload: JSON.stringify(payload) }); });
     }
 
+    // The face identify subscriptions not cancelled.
+    function faceArmed() {
+        return _faceSubs.filter(function(s) { return !s.cancelled; }).length;
+    }
+
     function _method(uri) {
+        if (/^luna:\/\/com\.webos\.service\.faceunlock\//.test(uri))
+            return "face:" + uri.replace(/^luna:\/\/com\.webos\.service\.faceunlock\//, "");
         return uri.replace(/^luna:\/\/com\.webos\.service\.(auth|fingerprint)\//, "");
     }
 
@@ -68,6 +82,12 @@ QtObject {
                 else
                     _answer(reply, { returnValue: false, lockedOut: false, retriesLeft: 0 });
             }
+        } else if (method === "face:abort") {
+            _faceSubs.forEach(function(s) {
+                if (!s.cancelled)
+                    _answer(s.reply, { returnValue: true, recognized: false, reason: "aborted" });
+            });
+            _answer(reply, { returnValue: true });
         } else if (method === "abort") {
             _identifySubs.forEach(function(s) {
                 if (!s.cancelled)
@@ -99,6 +119,12 @@ QtObject {
             var status = _status();
             status.subscribed = true;
             _answer(reply, status);
+        } else if (method === "face:getStatus") {
+            _faceStatusSubs.push(sub);
+            _answer(reply, { returnValue: true, subscribed: true, available: faceAvailable,
+                             enrolled: faceEnrolled, state: "idle" });
+        } else if (method === "face:identify") {
+            _faceSubs.push(sub);
         } else if (method === "identify") {
             if (!available || fingerprints.length === 0) {
                 _answer(reply, { returnValue: false, errorText: available ? "No fingerprints are enrolled"
@@ -121,6 +147,18 @@ QtObject {
         if (!s.cancelled)
             _answer(s.reply, _status());
     })
+
+    onFaceEnrolledChanged: _faceStatusSubs.forEach(function(s) {
+        if (!s.cancelled)
+            _answer(s.reply, { returnValue: true, available: faceAvailable, enrolled: faceEnrolled, state: "idle" });
+    })
+
+    function face(payload) {
+        _faceSubs.forEach(function(s) {
+            if (!s.cancelled)
+                _answer(s.reply, payload);
+        });
+    }
 
     function touch(matched) {
         _identifySubs.forEach(function(s) {
