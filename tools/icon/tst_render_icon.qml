@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Herman van Hazendonk <github.com@herrie.org>
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-License-Identifier: GPL-3.0-only
  *
  * Not a test: renders images/icon.svg to icon.png and icon-256x256.png
  * with Qt's SVG renderer, the one the device draws with. Run through

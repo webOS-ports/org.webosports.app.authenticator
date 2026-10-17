@@ -139,4 +139,4 @@ Quick Controls, Qt Quick Shapes and the key manager.
 
 ## Licence
 
-Apache License 2.0; see LICENSE.
+GNU General Public License version 3; see LICENSE.

@@ -1,6 +1,6 @@
 /*
  * Copyright 2026 Herman van Hazendonk <github.com@herrie.org>
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-License-Identifier: GPL-3.0-only
  *
  * The app's JavaScript (qml/js) under Node, as a second engine next to
  * QML's: the published vectors (vectors.js), each vector also recomputed
