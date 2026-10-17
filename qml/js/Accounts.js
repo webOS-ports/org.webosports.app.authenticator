@@ -24,8 +24,12 @@
  * everything else - issuer, name, algorithm, digits, period, counter and
  * the order - in an index, also in the key manager:
  *
- *     { "generation": 7, "accounts": [ { "id", "type", "issuer", "label",
- *       "algorithm", "digits", "period", "counter" }, ... ] }
+ *     { "generation": 7, "lock": true, "accounts": [ { "id", "type",
+ *       "issuer", "label", "algorithm", "digits", "period", "counter" },
+ *       ... ] }
+ *
+ * "lock" says the app asks for a fingerprint or the device passcode before
+ * it reads the secrets; it is left out when off.
  *
  * The key manager will not overwrite a key, so the index goes in turn to
  * one of two keys (INDEX_KEYS); the higher generation is the current one,
@@ -97,10 +101,14 @@ function validMeta(a) {
             && isWholeNumber(a.counter) && a.counter >= 0;
 }
 
-function serializeIndex(generation, accounts) {
-    return JSON.stringify({ generation: generation, accounts: accounts.map(function(a) {
+function serializeIndex(generation, accounts, lock) {
+    var index = { generation: generation };
+    if (lock === true)
+        index.lock = true;
+    index.accounts = accounts.map(function(a) {
         return metaFrom(a, a.id);
-    }) });
+    });
+    return JSON.stringify(index);
 }
 
 // The index from its stored text, or null when it is not one.
@@ -117,7 +125,7 @@ function parseIndex(text) {
         if (!validMeta(index.accounts[i]))
             return null;
     }
-    return { generation: index.generation, accounts: index.accounts };
+    return { generation: index.generation, lock: index.lock === true, accounts: index.accounts };
 }
 
 function newerIndex(a, b) {

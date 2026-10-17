@@ -3,7 +3,9 @@
 # notice: each mutation below must make tools/run-tests.sh fail. The file
 # is put back after each, and on exit.
 #
-#   tools/mutation-check.sh [path to luneos-components]
+#   [ONLY=<regex>] tools/mutation-check.sh [path to luneos-components]
+#
+# ONLY runs just the mutations whose description matches.
 set -e
 cd "$(dirname "$0")/.."
 LC=${1:-../luneos-components}
@@ -36,6 +38,18 @@ mutations=(
 "back gesture ignored while reordering ¦ qml/AccountsPage.qml ¦         } else if (reordering) { ¦         } else if (false) {"
 "link added without asking ¦ qml/main.qml ¦         openEditor({ \"prefill\": parsed.account, \"fromLink\": true }); ¦         accountStore.add(parsed.account);"
 "copy not copied ¦ qml/main.qml ¦         clipboardHelper.copy(); ¦         clipboardHelper.deselect();"
+"lock left out of the index ¦ qml/js/Accounts.js ¦     if (lock === true)\n        index.lock = true; ¦     if (false)\n        index.lock = true;"
+"secrets read while locked ¦ qml/AccountStore.qml ¦         if (lockEnabled && !_unlocked) { ¦         if (false) {"
+"secrets kept when locked again ¦ qml/AccountStore.qml ¦         _secrets = {};\n        _keys = {};\n        accounts = [];\n        status = \"locked\"; ¦         status = \"locked\";"
+"lock does not wait for a save ¦ qml/AccountStore.qml ¦         if (_busy || _queue.length > 0) { ¦         if (false) {"
+"a wrong passcode opens ¦ qml/LockScreen.qml ¦             if (result.matched) { ¦             if (!result.error && !result.lockedOut) {"
+"tries during a lockout ¦ qml/LockScreen.qml ¦     readonly property bool canEnter: !checking && !lockedOut && ¦     readonly property bool canEnter: !checking &&"
+"a missed fingerprint opens ¦ qml/DeviceAuth.qml ¦         if (reply.identified === true) { ¦         if (reply.identified !== undefined && reply.finished !== true) {"
+"misses forgotten on coming back ¦ qml/main.qml ¦             lockScreen.focusEntry(); ¦             lockScreen.reset();"
+"misses not counted ¦ qml/DeviceAuth.qml ¦                 fingerprintMisses++; ¦                 fingerprintMisses += 0;"
+"sensor armed in the background ¦ qml/main.qml ¦ accountStore.status === \"locked\" && appWindow.inFront ¦ accountStore.status === \"locked\""
+"never locks again ¦ qml/main.qml ¦         if (backgroundSince > 0 && lockClock() - backgroundSince >= relockAfterMs) ¦         if (false)"
+"lock on with no passcode to fall back on ¦ qml/main.qml ¦         if (!accountStore.lockEnabled && !deviceAuth.hasPasscode) { ¦         if (false) {"
 )
 
 failures=0
@@ -54,6 +68,9 @@ if s.count(a) != 1:
 open(p, "w").write(s.replace(a, os.environ["TO"]))' "$file"; then
         echo "BAD  $what: the text to change is not in $file"
         failures=$((failures + 1)); restore; continue
+    fi
+    if [ -n "$ONLY" ] && ! printf '%s' "$what" | grep -qE "$ONLY"; then
+        restore; continue
     fi
     if tools/run-tests.sh "$LC" > "$SAVE/out" 2>&1; then
         echo "MISS $what: the tests still pass"

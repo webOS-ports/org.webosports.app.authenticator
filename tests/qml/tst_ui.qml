@@ -12,7 +12,8 @@ import "../../qml/js/Accounts.js" as Accounts
 /*
  * The app itself - qml/main.qml and its pages - on the build host, with
  * luneos-components' desktop stand-ins for the window and the bus, and
- * FakeKeyManager.qml for com.palm.keymanager. Run by tests/run-qml-tests.sh.
+ * FakeKeyManager.qml for com.palm.keymanager, FakeAuth.qml for the screen
+ * lock and the fingerprint sensor. Run by tests/run-qml-tests.sh.
  */
 TestCase {
     id: test
@@ -21,6 +22,9 @@ TestCase {
 
     property var app: null
     property var keymanager: null
+    property var auth: null
+    // lockClock for the app, by the test.
+    property real lockNow: 1000000
 
     // RFC 6238's SHA1 seed, "12345678901234567890", as Base32.
     readonly property string rfcSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
@@ -39,11 +43,20 @@ TestCase {
         return keymanager;
     }
 
+    function makeAuth() {
+        var component = Qt.createComponent(Qt.resolvedUrl("FakeAuth.qml"));
+        if (component.status !== Component.Ready)
+            fail(component.errorString());
+        auth = component.createObject(test);
+        return auth;
+    }
+
     // Stored accounts, as the app writes them.
-    function seed(accounts, secrets, generation, slot) {
+    function seed(accounts, secrets, generation, slot, lock) {
         var keys = Object.assign({}, keymanager.keys);
         keys[Accounts.INDEX_KEYS[slot || 0]] = {
-            keydata: Accounts.serializeIndex(generation || 1, accounts), type: "ASCIIBLOB", nohide: true, noexport: true
+            keydata: Accounts.serializeIndex(generation || 1, accounts, lock === true), type: "ASCIIBLOB",
+            nohide: true, noexport: true
         };
         for (var id in secrets)
             keys[Accounts.secretKeyName(id)] = { keydata: secrets[id], type: "ASCIIBLOB", nohide: true, noexport: true };
@@ -58,11 +71,14 @@ TestCase {
     function createApp(timeMs, width, height, expectReady) {
         if (!keymanager)
             makeKeymanager();
+        if (!auth)
+            makeAuth();
         var component = Qt.createComponent(Qt.resolvedUrl("../../qml/main.qml"));
         if (component.status !== Component.Ready)
             fail(component.errorString());
         var t = timeMs === undefined ? 59000 : timeMs;
-        app = component.createObject(null, { bus: keymanager, clock: function() { return t; } });
+        app = component.createObject(null, { bus: keymanager, authBus: auth, clock: function() { return t; },
+                                             lockClock: function() { return test.lockNow; }, inFront: true });
         verify(app !== null, "main.qml did not load");
         app.now = t;
         if (width) {
@@ -88,6 +104,10 @@ TestCase {
         if (keymanager) {
             keymanager.destroy();
             keymanager = null;
+        }
+        if (auth) {
+            auth.destroy();
+            auth = null;
         }
         wait(0);
     }
@@ -603,9 +623,350 @@ TestCase {
         createApp();
         app.appMenu.popup(0, 0);
         tryVerify(function() { return app.appMenu.opened; });
-        compare(app.appMenu.count, 3);
+        compare(app.appMenu.count, 4);
         mouseClick(app.appMenu.itemAt(2));
         verify(page().reordering);
+    }
+
+    // --- the lock ------------------------------------------------------
+
+    function lockScreen() {
+        return findChild(app.contentItem, "lockScreen");
+    }
+
+    // A locked app with one account, the lock screen up.
+    function createLocked() {
+        if (!keymanager)
+            makeKeymanager();
+        seed([account("a1", "Example", "me", { digits: 8 })], { a1: rfcSecret }, 1, 0, true);
+        createApp(59000, undefined, undefined, false);
+        tryCompare(app.store, "status", "locked");
+        tryCompare(app.deviceAuth, "lockMode", auth.lockMode);
+        verify(lockScreen().visible);
+    }
+
+    function lockMessage() {
+        return findChild(lockScreen(), "lockMessage").text;
+    }
+
+    function typePin(pin) {
+        app.requestActivate();
+        tryVerify(function() { return app.active; });
+        lockScreen().forceActiveFocus();
+        for (var i = 0; i < pin.length; i++)
+            keyClick(pin[i]);
+    }
+
+    function test_not_locked_unless_asked() {
+        makeKeymanager();
+        seed([account("a1", "Example", "me")], { a1: rfcSecret });
+        createApp();
+        verify(!app.locked);
+        verify(!lockScreen().visible);
+        compare(auth.countOf("identify"), 0);
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        compare(app.appMenu.itemAt(3).text, "Lock with fingerprint or passcode");
+    }
+
+    function test_turning_the_lock_on_and_off() {
+        makeKeymanager();
+        seed([account("a1", "Example", "me")], { a1: rfcSecret });
+        createApp();
+        tryCompare(app.deviceAuth, "lockMode", "pin");
+        app.toggleLock();
+        tryCompare(app.store, "lockEnabled", true);
+        verify(storedIndex().lock);
+        compare(storedIndex().accounts.length, 1);
+        compare(app.toast, "Locked when opened");
+        // Turned on from inside, it stays open.
+        verify(!app.locked);
+        compare(list().count, 1);
+        app.toggleLock();
+        tryCompare(app.store, "lockEnabled", false);
+        verify(!storedIndex().lock);
+    }
+
+    function test_lock_needs_a_screen_lock_passcode() {
+        makeKeymanager();
+        makeAuth();
+        auth.lockMode = "none";
+        seed([account("a1", "Example", "me")], { a1: rfcSecret });
+        createApp();
+        tryCompare(app.deviceAuth, "lockMode", "none");
+        app.toggleLock();
+        verify(/Screen & Lock/.test(app.notice));
+        verify(!app.store.lockEnabled);
+        compare(storeCalls().length, 0);
+    }
+
+    // The secrets are not read before the lock is opened.
+    function test_locked_start_reads_no_secret() {
+        createLocked();
+        compare(keymanager.countOf("fetchKey"), 2);
+        compare(app.store.accounts.length, 0);
+        compare(app.store.keyOf("a1"), null);
+        verify(!list().visible);
+        verify(/Enter the screen lock PIN/.test(lockMessage()));
+        // No sensor set up: nothing armed.
+        compare(auth.armed(), 0);
+    }
+
+    function test_pin_opens_the_lock() {
+        createLocked();
+        typePin("1357");
+        compare(findChild(lockScreen(), "pinDots").text, "\u25cf\u25cf\u25cf\u25cf");
+        mouseClick(findChild(lockScreen(), "unlockButton"));
+        tryCompare(app.store, "status", "ready");
+        verify(!lockScreen().visible);
+        compare(auth.calls.filter(function(c) { return c.method === "matchDevicePasscode"; })[0].args.passCode, "1357");
+        compare(findChild(row(0), "codeLabel").text, "9428 7082");
+    }
+
+    function test_pin_pad_opens_the_lock() {
+        createLocked();
+        var pad = findChild(lockScreen(), "pinPad");
+        verify(pad.visible);
+        "1357".split("").forEach(function(d) { pad.keyAction(d); });
+        pad.keyAction("9");
+        pad.keyAction("\b");
+        compare(lockScreen().pin, "1357");
+        mouseClick(findChild(lockScreen(), "unlockButton"));
+        tryCompare(app.store, "status", "ready");
+    }
+
+    function test_wrong_pin_then_lockout() {
+        createLocked();
+        auth.lockoutAfter = 2;
+        typePin("0000");
+        keyClick(Qt.Key_Return);
+        tryVerify(function() { return lockMessage() === "That is not the PIN."; });
+        compare(app.store.status, "locked");
+        compare(lockScreen().pin, "");
+        typePin("1111");
+        keyClick(Qt.Key_Return);
+        tryVerify(function() { return lockScreen().lockedOut; });
+        verify(/Too many tries. Try again in 30 seconds/.test(lockMessage()));
+        verify(!findChild(lockScreen(), "pinPad").enabled);
+        // Not even the right one is sent while locked out.
+        var sent = auth.countOf("matchDevicePasscode");
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        wait(50);
+        compare(auth.countOf("matchDevicePasscode"), sent);
+        compare(app.store.status, "locked");
+    }
+
+    function test_passcode_check_refused() {
+        createLocked();
+        auth.denyMatch = true;
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryVerify(function() { return /cannot be checked: Denied/.test(lockMessage()); });
+        compare(app.store.status, "locked");
+    }
+
+    function test_password_opens_the_lock() {
+        makeAuth();
+        auth.lockMode = "password";
+        auth.passcode = "correct horse";
+        createLocked();
+        var field = findChild(lockScreen(), "passwordField");
+        verify(field.visible);
+        verify(!findChild(lockScreen(), "pinPad").visible);
+        field.text = "wrong horse";
+        field.accepted();
+        tryVerify(function() { return lockMessage() === "That is not the password."; });
+        compare(field.text, "");
+        field.text = "correct horse";
+        mouseClick(findChild(lockScreen(), "unlockButton"));
+        tryCompare(app.store, "status", "ready");
+    }
+
+    function test_pattern_opens_the_lock() {
+        makeAuth();
+        auth.lockMode = "pattern";
+        auth.passcode = "0-1-2-5-8";
+        createLocked();
+        verify(findChild(lockScreen(), "patternGrid").visible);
+        verify(!findChild(lockScreen(), "unlockButton").visible);
+        findChild(lockScreen(), "patternGrid").patternDrawn("0-3-6-7");
+        tryVerify(function() { return lockMessage() === "That is not the pattern."; });
+        findChild(lockScreen(), "patternGrid").patternDrawn("0-1-2-5-8");
+        tryCompare(app.store, "status", "ready");
+    }
+
+    function test_no_passcode_any_more() {
+        makeAuth();
+        auth.lockMode = "none";
+        createLocked();
+        verify(/No screen lock passcode is set/.test(lockMessage()));
+        verify(!findChild(lockScreen(), "pinPad").visible);
+        // Setting one in Settings opens the way.
+        auth.lockMode = "pin";
+        tryVerify(function() { return findChild(lockScreen(), "pinPad").visible; });
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+    }
+
+    function test_fingerprint_opens_the_lock() {
+        makeAuth();
+        auth.fingerprints = ["right-index"];
+        createLocked();
+        tryVerify(function() { return auth.armed() === 1; });
+        verify(/Touch the fingerprint sensor, or enter/.test(lockMessage()));
+        auth.touch(true);
+        tryCompare(app.store, "status", "ready");
+        compare(findChild(row(0), "codeLabel").text, "9428 7082");
+        // Not left armed.
+        tryVerify(function() { return auth.armed() === 0; });
+    }
+
+    function test_fingerprint_misses_leave_the_passcode() {
+        makeAuth();
+        auth.fingerprints = ["right-index"];
+        createLocked();
+        var cooldown = app.deviceAuth._missCooldown;
+        tryVerify(function() { return auth.armed() === 1; });
+        auth.touch(false);
+        tryVerify(function() { return lockMessage() === "The fingerprint was not recognised."; });
+        compare(app.store.status, "locked");
+        // Two captures of one press count once.
+        auth.touch(false);
+        wait(50);
+        compare(app.deviceAuth.fingerprintMisses, 1);
+        cooldown.interval = 10;
+        for (var i = 1; i < 5; i++) {
+            tryVerify(function() { return !cooldown.running; });
+            auth.touch(false);
+            tryCompare(app.deviceAuth, "fingerprintMisses", i + 1);
+        }
+        compare(lockMessage(), "Too many tries with the fingerprint; use the passcode.");
+        tryVerify(function() { return auth.armed() === 0; });
+        verify(auth.countOf("abort") >= 1);
+        // Away and back does not give more tries.
+        app.inFront = false;
+        app.inFront = true;
+        wait(50);
+        compare(app.deviceAuth.fingerprintMisses, 5);
+        compare(auth.armed(), 0);
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+    }
+
+    // The sensor is armed only while the app is in front.
+    function test_fingerprint_disarmed_in_the_background() {
+        makeAuth();
+        auth.fingerprints = ["right-index"];
+        createLocked();
+        tryVerify(function() { return auth.armed() === 1; });
+        app.inFront = false;
+        tryVerify(function() { return auth.armed() === 0; });
+        verify(auth.countOf("abort") >= 1);
+        app.inFront = true;
+        tryVerify(function() { return auth.armed() === 1; });
+    }
+
+    // The 30 second limit ends an identify; it is asked for again.
+    function test_fingerprint_rearmed_after_timeout() {
+        makeAuth();
+        auth.fingerprints = ["right-index"];
+        createLocked();
+        tryVerify(function() { return auth.armed() === 1; });
+        var before = auth.countOf("identify");
+        auth._identifySubs[0].reply({ payload: JSON.stringify({ returnValue: false, finished: true,
+                                                                identified: false, errorText: "Aborted" }) });
+        tryVerify(function() { return auth.countOf("identify") === before + 1; }, 3000);
+        compare(app.store.status, "locked");
+    }
+
+    function test_relocks_after_a_minute_away() {
+        createLocked();
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+        openEditor({});
+        waitForPage("editAccountPage");
+        // Back within the minute: still open.
+        app.inFront = false;
+        lockNow += 30000;
+        app.inFront = true;
+        compare(app.store.status, "ready");
+        compare(page().objectName, "editAccountPage");
+        // Away longer: locked, back on the list, the secrets let go.
+        app.inFront = false;
+        lockNow += 61000;
+        app.inFront = true;
+        tryCompare(app.store, "status", "locked");
+        verify(lockScreen().visible);
+        compare(app.pageStack.depth, 1);
+        compare(app.store.keyOf("a1"), null);
+        compare(app.store.accounts.length, 0);
+        compare(lockScreen().pin, "");
+    }
+
+    function test_relocks_in_the_background() {
+        createLocked();
+        app.relockAfterMs = 50;
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+        app.inFront = false;
+        tryCompare(app.store, "status", "locked");
+        compare(app.store.keyOf("a1"), null);
+    }
+
+    // A change being saved when the lock comes is finished first.
+    function test_relock_waits_for_a_save() {
+        createLocked();
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+        app.store.add({ type: "totp", issuer: "Second", label: "x", secret: otherSecret,
+                        algorithm: "SHA1", digits: 6, period: 30 });
+        app.lock();
+        verify(app.locked);
+        tryCompare(app.store, "status", "locked");
+        compare(storedIndex().accounts.length, 2);
+        verify(storedIndex().lock);
+    }
+
+    function test_link_waits_for_the_lock() {
+        createLocked();
+        app.openLink("otpauth://totp/Linked:me?secret=" + otherSecret + "&issuer=Linked");
+        compare(app.pageStack.depth, 1);
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        waitForPage("editAccountPage");
+        verify(page().fromLink);
+    }
+
+    function test_back_gesture_does_not_pass_the_lock() {
+        createLocked();
+        backGesture();
+        compare(app.store.status, "locked");
+        verify(lockScreen().visible);
+    }
+
+    function test_lock_layout_data() {
+        return test_layout_data();
+    }
+    function test_lock_layout(data) {
+        makeKeymanager();
+        seed([account("a1", "Example", "me")], { a1: rfcSecret }, 1, 0, true);
+        createApp(59000, data.w, data.h, false);
+        tryCompare(app.store, "status", "locked");
+        tryCompare(app.deviceAuth, "lockMode", "pin");
+        waitForRendering(app.contentItem);
+        var items = ["pinPad", "unlockButton", "lockMessage"];
+        for (var i = 0; i < items.length; i++) {
+            var item = findChild(lockScreen(), items[i]);
+            var p = item.mapToItem(lockScreen(), 0, 0);
+            verify(p.x >= 0 && p.x + item.width <= lockScreen().width, data.tag + ": " + items[i] + " runs off the side");
+        }
+        verify(lockScreen().width === app.contentItem.width && lockScreen().height === app.contentItem.height);
     }
 
     // --- layout --------------------------------------------------------

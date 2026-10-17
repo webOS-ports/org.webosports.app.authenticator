@@ -208,7 +208,12 @@ const meta = Accounts.metaFrom(fields, "abc");
 eq(meta, { id: "abc", type: "totp", issuer: "Example", label: "alice", algorithm: "SHA1", digits: 6, period: 30, counter: 0 },
    "metaFrom trims and keeps no secret");
 const index = Accounts.serializeIndex(7, [meta]);
-eq(Accounts.parseIndex(index), { generation: 7, accounts: [meta] }, "index round trip");
+eq(Accounts.parseIndex(index), { generation: 7, lock: false, accounts: [meta] }, "index round trip");
+eq(JSON.parse(index).lock, undefined, "no lock key when off");
+eq(Accounts.parseIndex(Accounts.serializeIndex(8, [meta], true)), { generation: 8, lock: true, accounts: [meta] },
+   "index round trip with the lock");
+eq(Accounts.parseIndex(JSON.stringify({ generation: 1, lock: "yes", accounts: [] })).lock, false,
+   "only true locks");
 eq(Accounts.parseIndex("{nonsense"), null, "garbled index");
 eq(Accounts.parseIndex(JSON.stringify({ generation: 1, accounts: [{ id: "x", type: "foo" }] })), null, "bad account in index");
 eq(Accounts.newerIndex({ generation: 3 }, { generation: 4 }).generation, 4, "newer index wins");

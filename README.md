@@ -20,6 +20,10 @@ RFC 6238) and counter-based (HOTP, RFC 4226).
 - Touch and hold an account to edit or delete it. "Change the order" in
   the app menu puts Up and Down on the rows.
 - The back gesture leaves the editor, closes a dialog and ends reordering.
+- "Lock with fingerprint or passcode" in the app menu: from then on the
+  app asks for an enrolled fingerprint or the screen lock passcode when
+  it opens, and again after a minute in the background. See
+  [The lock](#the-lock).
 
 ## Screenshots
 
@@ -63,6 +67,44 @@ that app's keys. The key manager in images up to now also writes stored
 keys to the system log; a fix is on keymanager's
 `herrie/no-key-material-in-logs` branch.
 
+## The lock
+
+With the lock on, the app asks who is holding the device before it reads
+any secret from the key manager: a fingerprint, or the passcode the
+screen is locked with (PIN, password or pattern), taken the way the lock
+screen takes it.
+
+- The fingerprint goes through `com.webos.service.fingerprint`
+  (webos-fingerprint-adapter, biomd, the Android HAL). The sensor is armed
+  only while the lock is shown and the app is in front, and given up after
+  five touches that do not match; then only the passcode opens it.
+- The passcode is checked by luna-authmanager (`matchDevicePasscode` on
+  `com.webos.service.auth`), so wrong tries here count with the lock
+  screen's, and share its lockout: after five, 30 seconds, then doubling.
+  Under an Exchange policy with a retry limit, they also count towards
+  that policy's wipe.
+- The lock can only be turned on while the device has a screen lock
+  passcode, so a sensor that stops working never shuts you out. If the
+  passcode is removed later, the app says to set one in Screen & Lock
+  and then takes that one.
+- Locked, the app lets go of the secrets and the list and leaves any
+  open page. A change being saved is finished first. An otpauth:// link
+  that comes while it is locked opens once it is unlocked.
+- Whether the lock is on is kept in the index (`"lock": true`), so it is
+  as safe from change as the accounts are. An older version of the app
+  leaves the flag out the next time it writes the index, which turns the
+  lock off.
+
+What the lock does not do: the keys in the key manager stay exactly as
+they were, and the key manager hands them out without asking for a
+fingerprint. Whoever can read them without the lock (root, or a caller
+allowed to name the app id) still can. The lock is for the device in
+someone else's hand, unlocked. The fingerprint count starts over each
+time the app is opened; one count across all of the device's factors is
+luna-authmanager's to keep, and it does not do that yet.
+webos-fingerprint-adapter sends identify results to every subscriber,
+which is why the sensor is disarmed whenever the app is not in front.
+
 ## Permissions
 
 `requiredPermissions` in appinfo.json:
@@ -70,6 +112,13 @@ keys to the system log; a fix is on keymanager's
 - `keymanager-service.operation`: store, fetch and remove keys.
 - `application.launcher`: open the Camera from "Scan a QR code".
 - `appmanager.management`: the application manager's handler table.
+- `auth.query`: the screen lock mode (`getDeviceLockMode`).
+- `auth.verify`: checking the screen lock passcode
+  (`matchDevicePasscode`), without being able to set it. A new group, on
+  luna-authmanager's `herrie/auth-verify` branch.
+- `fingerprint.identify`: the sensor's status, `identify` and `abort`,
+  without enrolling or removing fingerprints. A new group, on
+  webos-fingerprint-adapter's `herrie/identify-group` branch.
 
 `"mimeTypes": [{ "scheme": "otpauth" }]` registers the app for
 otpauth:// links; it is opened with `{"target": "otpauth://..."}`.
@@ -104,11 +153,17 @@ It builds an "Architecture: all" ipk and installs it through
   deleting; reordering; counter-based codes; a key manager that refuses
   or never answers; the two index keys and a damaged one; a failed write;
   the back gesture; the app menu; the layout at 320x480, 480x800, 720x720
-  and 1024x768.
+  and 1024x768. The lock, with `FakeAuth.qml` in place of luna-authmanager
+  and the fingerprint service: no secret read while locked; PIN (pad and
+  keyboard), password and pattern; wrong passcodes and the lockout; a
+  refused check; no passcode set; a fingerprint that matches, misses,
+  times out and is disarmed in the background; locking again after a
+  minute away and while a change is being saved; links while locked; the
+  lock screen's layout.
 
-`tools/mutation-check.sh` breaks the code in 21 ways, one at a time (the
+`tools/mutation-check.sh` breaks the code in 33 ways, one at a time (the
 hashes, the truncation, Base32, the index, the order of writes, the back
-gesture and more), and checks that the tests fail for each.
+gesture, the lock and more), and checks that the tests fail for each.
 
 On a device:
 
@@ -143,8 +198,10 @@ appinfo.json, the icons, LICENSE and `qml/` to
 role, manifest and client-permission files granting the groups above
 (see Sound Recorder's `sysbus/`). It has nothing to build and no
 architecture-specific files. RDEPENDS: qml-runner, luneos-components
-(LuneOS.Forms, LuneOS.Components, LuneOS.Service, LuneOS.System), Qt
-Quick Controls, Qt Quick Shapes and the key manager.
+(LuneOS.Forms, LuneOS.Components, LuneOS.Service, LuneOS.System,
+LuneOS.Passcode), Qt Quick Controls, Qt Quick Shapes, the key manager and
+luna-authmanager; webos-fingerprint-adapter where the device has a
+sensor.
 
 ## Licence
 

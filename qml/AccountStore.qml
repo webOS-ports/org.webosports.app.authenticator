@@ -33,17 +33,23 @@ import "js/Base32.js" as Base32
  * Nothing is written before the index has been read: if the key manager
  * cannot be reached, the app says so and leaves what is stored alone,
  * rather than starting over with nothing and writing that back.
+ *
+ * When the index says the app is locked (lockEnabled), the secrets are not
+ * read until unlock(), and lock() lets go of them and of the list again.
  */
 QtObject {
     id: store
 
     property var bus: null
 
-    // "loading", "ready" or "failed".
+    // "loading", "locked", "ready" or "failed".
     property string status: "loading"
     property string errorText: ""
     // The accounts in their order, without their secrets.
     property var accounts: []
+    // Whether the app asks for a fingerprint or the passcode first; from
+    // the index, so it is as safe from change as the accounts are.
+    property bool lockEnabled: false
     // A change that could not be saved, in words; "" when none.
     signal saveFailed(string message)
 
@@ -59,6 +65,10 @@ QtObject {
     property int _currentSlot: -1
     property var _queue: []
     property bool _busy: false
+    // Unlocked since the last lock(): the secrets may be read.
+    property bool _unlocked: false
+    // lock() came while a change was being saved; done when it is.
+    property bool _lockWanted: false
 
     // A call that the key manager never answers: give up after this long.
     property int timeoutMs: 20000
@@ -150,6 +160,13 @@ QtObject {
             return;
         }
         var index = Accounts.newerIndex(results[0], results[1]);
+        lockEnabled = index !== null && index.lock;
+        if (lockEnabled && !_unlocked) {
+            _generation = index.generation;
+            _currentSlot = index === results[0] ? 0 : 1;
+            _forget();
+            return;
+        }
         if (!index) {
             _generation = 0;
             _currentSlot = -1;
@@ -206,12 +223,68 @@ QtObject {
         status = "failed";
     }
 
+    // After a fingerprint or the passcode: reads the secrets.
+    function unlock() {
+        _unlocked = true;
+        _lockWanted = false;
+        if (status === "locked")
+            load();
+    }
+
+    /*
+     * Lets go of the secrets and the list, once any change being saved is
+     * done; unlock() reads them again. Nothing to do when the app is not
+     * locked.
+     */
+    function lock() {
+        _unlocked = false;
+        if (!lockEnabled || status !== "ready")
+            return;
+        if (_busy || _queue.length > 0) {
+            _lockWanted = true;
+            return;
+        }
+        _forget();
+    }
+
+    function _forget() {
+        _lockWanted = false;
+        _secrets = {};
+        _keys = {};
+        accounts = [];
+        status = "locked";
+    }
+
+    /*
+     * Turns the lock on or off: a new generation of the index with the
+     * same accounts. callback(error).
+     */
+    function setLockEnabled(on, callback) {
+        if (!_ready(callback))
+            return;
+        _enqueue(function(next) {
+            _writeIndex(accounts, function(error) {
+                if (error !== "") {
+                    _report("The change could not be saved: " + error, callback);
+                } else {
+                    lockEnabled = on;
+                    // Turned on from inside the app: it stays open until it
+                    // is next locked.
+                    _unlocked = true;
+                    if (callback)
+                        callback("");
+                }
+                next();
+            }, on);
+        });
+    }
+
     /*
      * Writes the next generation of the index, with `list`, into the key
      * that does not hold the current one: removes what is there, then
-     * stores. done(error).
+     * stores. done(error). `lock` is the new lockEnabled, when it changes.
      */
-    function _writeIndex(list, done) {
+    function _writeIndex(list, done, lock) {
         var slot = _currentSlot === 0 ? 1 : 0;
         var name = Accounts.INDEX_KEYS[slot];
         var generation = _generation + 1;
@@ -222,7 +295,8 @@ QtObject {
             }
             _call("store", {
                 "keyname": name,
-                "keydata": Accounts.serializeIndex(generation, list),
+                "keydata": Accounts.serializeIndex(generation, list,
+                                                   lock === undefined ? lockEnabled : lock),
                 "type": "ASCIIBLOB",
                 "nohide": true,
                 "noexport": true
@@ -246,8 +320,13 @@ QtObject {
     }
 
     function _next() {
-        if (_busy || _queue.length === 0)
+        if (_busy)
             return;
+        if (_queue.length === 0) {
+            if (_lockWanted)
+                _forget();
+            return;
+        }
         _busy = true;
         var operation = _queue.shift();
         operation(function() {
