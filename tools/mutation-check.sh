@@ -3,7 +3,9 @@
 # notice: each mutation below must make tools/run-tests.sh fail. The file
 # is put back after each, and on exit.
 #
-#   tools/mutation-check.sh [path to luneos-components]
+#   [ONLY=<regex>] tools/mutation-check.sh [path to luneos-components]
+#
+# ONLY runs just the mutations whose description matches.
 set -e
 cd "$(dirname "$0")/.."
 LC=${1:-../luneos-components}
@@ -36,6 +38,29 @@ mutations=(
 "back gesture ignored while reordering ¦ qml/AccountsPage.qml ¦         } else if (reordering) { ¦         } else if (false) {"
 "link added without asking ¦ qml/main.qml ¦         openEditor({ \"prefill\": parsed.account, \"fromLink\": true }); ¦         accountStore.add(parsed.account);"
 "copy not copied ¦ qml/main.qml ¦         clipboardHelper.copy(); ¦         clipboardHelper.deselect();"
+"lock left out of the index ¦ qml/js/Accounts.js ¦     if (options && options.lock === true) { ¦     if (false) {"
+"secrets read while locked ¦ qml/AccountStore.qml ¦         if (lockEnabled && !_unlocked) { ¦         if (false) {"
+"secrets kept when locked again ¦ qml/AccountStore.qml ¦         _secrets = {};\n        _keys = {};\n        accounts = [];\n        status = \"locked\"; ¦         status = \"locked\";"
+"lock does not wait for a save ¦ qml/AccountStore.qml ¦         if (_busy || _queue.length > 0) { ¦         if (false) {"
+"a wrong passcode opens ¦ qml/LockScreen.qml ¦             if (result.matched) { ¦             if (!result.error && !result.lockedOut) {"
+"tries during a lockout ¦ qml/LockScreen.qml ¦     readonly property bool canEnter: !checking && !lockedOut && ¦     readonly property bool canEnter: !checking &&"
+"a missed fingerprint opens ¦ qml/DeviceAuth.qml ¦         if (reply.identified === true) { ¦         if (reply.identified !== undefined && reply.finished !== true) {"
+"misses forgotten on coming back ¦ qml/main.qml ¦             lockScreen.focusEntry(); ¦             lockScreen.reset();"
+"misses not counted ¦ qml/DeviceAuth.qml ¦                 fingerprintMisses++; ¦                 fingerprintMisses += 0;"
+"sensor armed in the background ¦ qml/main.qml ¦ accountStore.status === \"locked\" && appWindow.inFront ¦ accountStore.status === \"locked\""
+"never locks again ¦ qml/main.qml ¦         if (backgroundSince > 0 && lockClock() - backgroundSince >= relockAfterMs) ¦         if (false)"
+"face stored without the lock ¦ qml/js/Accounts.js ¦             face: index.lock === true && index.face === true, ¦             face: index.face === true,"
+"face used without being turned on ¦ qml/DeviceAuth.qml ¦     readonly property bool faceReady: faceAllowed && faceAvailable ¦     readonly property bool faceReady: faceAvailable"
+"a face that does not match opens ¦ qml/DeviceAuth.qml ¦         if (reply.recognized === true) { ¦         if (reply.recognized !== undefined) {"
+"an empty frame counts as a miss ¦ qml/DeviceAuth.qml ¦             if (reason !== \"noFace\" && reason !== \"aborted\") { ¦             if (reason !== \"aborted\") {"
+"face misses not counted ¦ qml/DeviceAuth.qml ¦                 faceMisses++; ¦                 faceMisses += 0;"
+"face tried without end ¦ qml/DeviceAuth.qml ¦ listening && faceReady && faceTries < maxFaceTries && !faceBlocked ¦ listening && faceReady && !faceBlocked"
+"busy camera tried again at once ¦ qml/DeviceAuth.qml ¦         faceBlocked = true; ¦         faceBlocked = false;"
+"camera held in the background ¦ qml/DeviceAuth.qml ¦     readonly property bool faceActive: listening && ¦     readonly property bool faceActive: true &&"
+"a stale face reply counts ¦ qml/DeviceAuth.qml ¦ function(message) { if (_faceCall === call) _faceReply(message); }, ¦ function(message) { _faceReply(message); },"
+"lock off keeps face ¦ qml/AccountStore.qml ¦         _setOptions({ lock: on, face: on && faceEnabled }, callback); ¦         _setOptions({ lock: on, face: faceEnabled }, callback);"
+"face on without asking ¦ qml/main.qml ¦         faceDialog.visible = true; ¦         accountStore.setFaceEnabled(true);"
+"lock on with no passcode to fall back on ¦ qml/main.qml ¦         if (!accountStore.lockEnabled && !deviceAuth.hasPasscode) { ¦         if (false) {"
 )
 
 failures=0
@@ -54,6 +79,9 @@ if s.count(a) != 1:
 open(p, "w").write(s.replace(a, os.environ["TO"]))' "$file"; then
         echo "BAD  $what: the text to change is not in $file"
         failures=$((failures + 1)); restore; continue
+    fi
+    if [ -n "$ONLY" ] && ! printf '%s' "$what" | grep -qE "$ONLY"; then
+        restore; continue
     fi
     if tools/run-tests.sh "$LC" > "$SAVE/out" 2>&1; then
         echo "MISS $what: the tests still pass"

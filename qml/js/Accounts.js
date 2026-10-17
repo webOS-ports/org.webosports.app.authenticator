@@ -24,8 +24,13 @@
  * everything else - issuer, name, algorithm, digits, period, counter and
  * the order - in an index, also in the key manager:
  *
- *     { "generation": 7, "accounts": [ { "id", "type", "issuer", "label",
- *       "algorithm", "digits", "period", "counter" }, ... ] }
+ *     { "generation": 7, "lock": true, "face": true, "accounts": [ { "id",
+ *       "type", "issuer", "label", "algorithm", "digits", "period",
+ *       "counter" }, ... ] }
+ *
+ * "lock" says the app asks for a fingerprint or the device passcode before
+ * it reads the secrets; "face" that a face opens it too, which counts only
+ * with "lock". Each is left out when off.
  *
  * The key manager will not overwrite a key, so the index goes in turn to
  * one of two keys (INDEX_KEYS); the higher generation is the current one,
@@ -97,10 +102,18 @@ function validMeta(a) {
             && isWholeNumber(a.counter) && a.counter >= 0;
 }
 
-function serializeIndex(generation, accounts) {
-    return JSON.stringify({ generation: generation, accounts: accounts.map(function(a) {
+// options: { lock, face }, both off when left out.
+function serializeIndex(generation, accounts, options) {
+    var index = { generation: generation };
+    if (options && options.lock === true) {
+        index.lock = true;
+        if (options.face === true)
+            index.face = true;
+    }
+    index.accounts = accounts.map(function(a) {
         return metaFrom(a, a.id);
-    }) });
+    });
+    return JSON.stringify(index);
 }
 
 // The index from its stored text, or null when it is not one.
@@ -117,7 +130,8 @@ function parseIndex(text) {
         if (!validMeta(index.accounts[i]))
             return null;
     }
-    return { generation: index.generation, accounts: index.accounts };
+    return { generation: index.generation, lock: index.lock === true,
+             face: index.lock === true && index.face === true, accounts: index.accounts };
 }
 
 function newerIndex(a, b) {
