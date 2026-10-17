@@ -126,6 +126,15 @@ mindphone (armv7, with taps) every check passed but the editor's, whose
 screen reading missed the title; that check now also takes the
 editor's "From a link" line, and has not been run there since.
 
+## Icon
+
+`images/icon.svg` is the icon; `tools/make-icon.sh` renders `icon.png` and
+`icon-256x256.png` from it with Qt, as the launcher draws it. It is design
+D3a of the sixteen in the legacy app icon style that
+`tools/icon/make-variants.py` draws into `tools/icon/variants/`: a
+combination lock dial numbered 0 to 35 inside a ring that runs down like a
+code's remaining time. The SVGs use no filters, which Qt's renderer lacks.
+
 ## A recipe
 
 A meta-webos-ports recipe would need what other QML apps have: install

@@ -1,0 +1,21 @@
+<!-- Authenticator icon design O2-enamel-badge, on the app plate.
+     Copyright 2026 Herman van Hazendonk <github.com@herrie.org>
+     SPDX-License-Identifier: GPL-3.0-only
+     Drawn by tools/icon/make-variants.py. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+<defs><radialGradient id="r1" cx="128" cy="232" r="104" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#000" stop-opacity="0.4"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient><radialGradient id="r2" cx="104" cy="92" r="150" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#f4f6f8" stop-opacity="1"/><stop offset="0.7" stop-color="#b8bfc7" stop-opacity="1"/><stop offset="1" stop-color="#6f7780" stop-opacity="1"/></radialGradient><radialGradient id="r3" cx="116" cy="96" r="130" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4f9be8" stop-opacity="1"/><stop offset="0.7" stop-color="#2a6dbd" stop-opacity="1"/><stop offset="1" stop-color="#1a4c8c" stop-opacity="1"/></radialGradient><linearGradient id="l4" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2f4f6" stop-opacity="1"/><stop offset="0.5" stop-color="#a9b0b8" stop-opacity="1"/><stop offset="1" stop-color="#6e757e" stop-opacity="1"/></linearGradient><linearGradient id="l5" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbfcfd" stop-opacity="1"/><stop offset="0.5" stop-color="#d3d8de" stop-opacity="1"/><stop offset="1" stop-color="#9aa2ab" stop-opacity="1"/></linearGradient><linearGradient id="l6" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.7"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+<ellipse cx="128" cy="232" rx="104" ry="104" fill="url(#r1)" transform="translate(128 232) scale(1 0.11538461538461539) translate(-128 -232)"/>
+<circle cx="128" cy="128" r="116" fill="url(#r2)" stroke="#4f565e" stroke-width="2"/>
+<circle cx="128" cy="128" r="102" fill="url(#r3)"/>
+<circle cx="128" cy="128" r="101" fill="none" stroke="#0f325e" stroke-width="2"/>
+<g transform="translate(128 126) scale(1.14) translate(-128 -128)">
+<circle cx="128" cy="128" r="84" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="10"/>
+<path d="M128.0,44.0 A84,84 0 1 1 49.1,99.3" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/>
+<path d="M96.8,108.80000000000001 V97.60000000000001 a31.2,31.2 0 0 1 62.4,0 V108.80000000000001" fill="none" stroke="#5b6168" stroke-width="18.6"/>
+<path d="M96.8,108.80000000000001 V97.60000000000001 a31.2,31.2 0 0 1 62.4,0 V108.80000000000001" fill="none" stroke="url(#l4)" stroke-width="15.6"/>
+<rect x="80.0" y="104.80000000000001" width="96.0" height="74.39999999999999" rx="10.799999999999999" fill="url(#l5)" stroke="#6b737c" stroke-width="1.5"/>
+<rect x="84.0" y="107.80000000000001" width="88.0" height="22.319999999999997" rx="8.4" fill="url(#l6)"/>
+<circle cx="128" cy="138.28" r="9.6" fill="#2d3238"/>
+<path d="M123.8,142.0 L122.0,162.832 H134.0 L132.2,142.0 Z" fill="#2d3238"/>
+</g>
+</svg>
