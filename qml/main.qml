@@ -157,7 +157,18 @@ AppWindow {
             });
             return;
         }
-        faceDialog.visible = true;
+        faceDialog.ask({
+            title: "Open with a face?",
+            message: "A face is weaker than the passcode: the camera sees only a picture, so someone who "
+                     + "looks like you, or a good photo of you, can sometimes pass. Anyone who opens the "
+                     + "app can see and copy your codes.",
+            onAccepted: function() {
+                accountStore.setFaceEnabled(true, function(error) {
+                    if (error === "")
+                        showToast("Opened with a face too");
+                });
+            }
+        });
     }
 
     function toggleLock() {
@@ -321,20 +332,8 @@ AppWindow {
         objectName: "faceDialog"
         parent: appWindow.contentItem
         visible: false
-        title: "Open with a face?"
-        message: "A face is weaker than the passcode: the camera sees only a picture, so someone who "
-                 + "looks like you, or a good photo of you, can sometimes pass. Anyone who opens the "
-                 + "app can see and copy your codes."
         dialogHeight: Units.gu(30)
         dialogWidth: Math.min(Units.gu(40), appWindow.width - Units.gu(4))
-        onAccepted: {
-            visible = false;
-            accountStore.setFaceEnabled(true, function(error) {
-                if (error === "")
-                    appWindow.showToast("Opened with a face too");
-            });
-        }
-        onRejected: visible = false
     }
 
     LockScreen {

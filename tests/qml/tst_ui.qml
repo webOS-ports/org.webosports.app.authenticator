@@ -183,6 +183,13 @@ TestCase {
         mouseClick(findChild(app.header, "saveButton"));
     }
 
+    // Taps the dialog's OK (accept) or Cancel, as a user would.
+    function answer(dialog, accept) {
+        var button = findChild(dialog, accept ? "confirmAcceptButton" : "confirmRejectButton");
+        verify(button !== null && button.visible, "no " + (accept ? "accept" : "reject") + " button");
+        mouseClick(button);
+    }
+
     // The toast's words while it shows, "" when none is up.
     function toastText() {
         var label = findChild(app.contentItem, "toast");
@@ -460,13 +467,33 @@ TestCase {
         mouseClick(page().accountMenu.itemAt(1));
         var dialog = findChild(page(), "deleteDialog");
         tryVerify(function() { return dialog.visible; });
+        compare(dialog.title, "Delete account");
         verify(/One/.test(dialog.message));
-        dialog.accepted();
+        answer(dialog, true);
+        verify(!dialog.visible);
         tryCompare(list(), "count", 1);
         compare(findChild(row(0), "titleLabel").text, "Two");
         compare(storedIndex().accounts.length, 1);
         tryVerify(function() { return keymanager.keys[Accounts.secretKeyName("a1")] === undefined; });
         verify(keymanager.keys[Accounts.secretKeyName("a2")] !== undefined);
+    }
+
+    function test_delete_cancelled_keeps_the_account() {
+        makeKeymanager();
+        seed([account("a1", "One", "x"), account("a2", "Two", "y")], { a1: otherSecret, a2: rfcSecret });
+        createApp();
+        mousePress(row(1));
+        tryVerify(function() { return page().accountMenu.opened; }, 3000);
+        mouseRelease(row(1));
+        mouseClick(page().accountMenu.itemAt(1));
+        var dialog = findChild(page(), "deleteDialog");
+        tryVerify(function() { return dialog.visible; });
+        verify(/Two/.test(dialog.message), dialog.message);
+        answer(dialog, false);
+        verify(!dialog.visible);
+        wait(50);
+        compare(list().count, 2);
+        compare(storedIndex().accounts.length, 2);
     }
 
     function test_delete_from_the_editor() {
@@ -475,8 +502,10 @@ TestCase {
         createApp();
         openEditor({ accountId: "a1" });
         mouseClick(findChild(page(), "deleteButton"));
-        verify(findChild(page(), "deleteDialog").visible);
-        findChild(page(), "deleteDialog").accepted();
+        var dialog = findChild(page(), "deleteDialog");
+        verify(dialog.visible);
+        verify(/Delete this account/.test(dialog.message), dialog.message);
+        answer(dialog, true);
         waitForPage("accountsPage");
         verify(findChild(page(), "emptyState").visible);
         compare(storedIndex().accounts.length, 0);
@@ -1038,11 +1067,14 @@ TestCase {
         app.toggleFace();
         verify(dialog.visible);
         verify(/good photo of you/.test(dialog.message));
-        dialog.rejected();
+        compare(dialog.title, "Open with a face?");
+        answer(dialog, false);
         verify(!dialog.visible);
+        wait(50);
         verify(!app.store.faceEnabled);
         app.toggleFace();
-        dialog.accepted();
+        answer(dialog, true);
+        verify(!dialog.visible);
         tryCompare(app.store, "faceEnabled", true);
         verify(storedIndex().face);
         compare(toastText(), "Opened with a face too");
