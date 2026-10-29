@@ -60,6 +60,9 @@ mutations=(
 "a stale face reply counts ¦ qml/DeviceAuth.qml ¦ function(message) { if (_faceCall === call) _faceReply(message); }, ¦ function(message) { _faceReply(message); },"
 "lock off keeps face ¦ qml/AccountStore.qml ¦         _setOptions({ lock: on, face: on && faceEnabled }, callback); ¦         _setOptions({ lock: on, face: faceEnabled }, callback);"
 "face on without asking ¦ qml/main.qml ¦         faceDialog.visible = true; ¦         accountStore.setFaceEnabled(true);"
+"toast shown nowhere ¦ qml/main.qml ¦         toast.show(text); ¦         toast.text = text;"
+"toast in the middle ¦ qml/main.qml ¦         anchors.centerIn: undefined ¦         anchors.centerIn: parent"
+"toast stays up ¦ qml/main.qml ¦         id: toast\n ¦         id: toast\n        duration: 60000\n"
 "lock on with no passcode to fall back on ¦ qml/main.qml ¦         if (!accountStore.lockEnabled && !deviceAuth.hasPasscode) { ¦         if (false) {"
 )
 

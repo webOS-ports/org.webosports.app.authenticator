@@ -6,6 +6,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtTest
+import LunaNext.Common 0.1
 
 import "../../qml/js/Accounts.js" as Accounts
 
@@ -182,6 +183,13 @@ TestCase {
         mouseClick(findChild(app.header, "saveButton"));
     }
 
+    // The toast's words while it shows, "" when none is up.
+    function toastText() {
+        var label = findChild(app.contentItem, "toast");
+        verify(label !== null, "no toast label");
+        return label.visible ? label.text : "";
+    }
+
     // Pictures of the app, for comparing a change by eye; not checked.
     readonly property string shotDir: decodeURIComponent(Qt.resolvedUrl("../../build/test-output/ui").toString()
                                                          .replace(/^file:\/\//, ""))
@@ -270,8 +278,13 @@ TestCase {
         pasteTarget.text = "";
         pasteTarget.paste();
         compare(pasteTarget.text, "287082");
-        compare(app.toast, "Copied Example’s code");
-        verify(findChild(app.contentItem, "toast").visible);
+        compare(toastText(), "Copied Example’s code");
+        // At the bottom, over the list.
+        var toast = findChild(app.contentItem, "toast");
+        var bottom = toast.mapToItem(app.contentItem, 0, toast.height).y;
+        verify(bottom > app.contentItem.height - Units.gu(6), "toast not at the bottom: " + bottom);
+        // And goes by itself.
+        tryVerify(function() { return toastText() === ""; }, 4000, "the toast stays");
     }
 
     function test_account_without_secret_says_so() {
@@ -297,7 +310,7 @@ TestCase {
         waitForPage("accountsPage");
         compare(list().count, 1);
         compare(findChild(row(0), "codeLabel").text, "287 082");
-        compare(app.toast, "Added Example");
+        compare(toastText(), "Added Example");
 
         // The secret under its own key, normalized, kept from backups and
         // readable by the app; the index naming it.
@@ -484,7 +497,7 @@ TestCase {
         tryVerify(function() { return findChild(row(0), "titleLabel").text === "Two"; });
         // Tapping copies nothing while reordering.
         mouseClick(row(2), 10, 10);
-        compare(app.toast, "");
+        compare(toastText(), "");
         verify(findChild(app.header, "doneButton") !== null);
         mouseClick(findChild(app.header, "doneButton"));
         verify(!page().reordering);
@@ -694,7 +707,7 @@ TestCase {
         tryCompare(app.store, "lockEnabled", true);
         verify(storedIndex().lock);
         compare(storedIndex().accounts.length, 1);
-        compare(app.toast, "Locked when opened");
+        compare(toastText(), "Locked when opened");
         // Turned on from inside, it stays open.
         verify(!app.locked);
         compare(list().count, 1);
@@ -1032,7 +1045,7 @@ TestCase {
         dialog.accepted();
         tryCompare(app.store, "faceEnabled", true);
         verify(storedIndex().face);
-        compare(app.toast, "Opened with a face too");
+        compare(toastText(), "Opened with a face too");
         app.toggleFace();
         tryCompare(app.store, "faceEnabled", false);
         verify(!storedIndex().face);

@@ -59,8 +59,6 @@ AppWindow {
     property alias appMenu: appMenu
     // Says what went wrong, under the header, until dismissed.
     property string notice: ""
-    // A short "Copied" and the like, that goes by itself.
-    property string toast: ""
     // An otpauth:// link that came before the accounts were read.
     property string pendingLink: ""
 
@@ -197,15 +195,9 @@ AppWindow {
         clipboardHelper.text = "";
     }
 
+    // A short "Copied" and the like, that goes by itself.
     function showToast(text) {
-        toast = text;
-        toastTimer.restart();
-    }
-
-    Timer {
-        id: toastTimer
-        interval: 2500
-        onTriggered: appWindow.toast = ""
+        toast.show(text);
     }
 
     /*
@@ -356,25 +348,12 @@ AppWindow {
     }
 
     // "Copied": at the bottom, over the list, for a moment.
-    Rectangle {
-        objectName: "toast"
+    Toast {
+        id: toast
         parent: appWindow.contentItem
-        z: 100
-        visible: appWindow.toast !== ""
+        anchors.centerIn: undefined
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Units.gu(3)
-        width: toastLabel.implicitWidth + Units.gu(4)
-        height: toastLabel.implicitHeight + Units.gu(2)
-        radius: height / 2
-        color: "#e0303030"
-
-        Label {
-            id: toastLabel
-            anchors.centerIn: parent
-            color: "white"
-            text: appWindow.toast
-            font.pixelSize: FontUtils.sizeToPixels("medium")
-        }
     }
 }
