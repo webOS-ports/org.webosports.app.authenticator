@@ -290,6 +290,11 @@ TestCase {
         var toast = findChild(app.contentItem, "toast");
         var bottom = toast.mapToItem(app.contentItem, 0, toast.height).y;
         verify(bottom > app.contentItem.height - Units.gu(6), "toast not at the bottom: " + bottom);
+        // The app's pill, up at once
+        var box = toast.parent;
+        compare(box.radius, box.height / 2, "a pill");
+        verify(Qt.colorEqual(box.color, "#e0303030"));
+        compare(box.opacity, 1, "no fade");
         // And goes by itself.
         tryVerify(function() { return toastText() === ""; }, 4000, "the toast stays");
     }

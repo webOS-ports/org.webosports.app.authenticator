@@ -354,5 +354,9 @@ AppWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Units.gu(3)
+        // The app's pill, as it was, there and gone without a fade
+        radius: height / 2
+        color: "#e0303030"
+        fadeDuration: 0
     }
 }
