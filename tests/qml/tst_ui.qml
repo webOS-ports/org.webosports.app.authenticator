@@ -579,9 +579,10 @@ TestCase {
         compare(storeCalls().length, 0);
         // Dismissing the notice tries again.
         keymanager.failMethods = {};
-        notice.dismissed();
+        mouseClick(findChild(notice, "noticeCloseButton"));
         tryCompare(app.store, "status", "ready");
         compare(list().count, 1);
+        verify(!notice.visible);
     }
 
     function test_key_manager_that_never_answers() {
