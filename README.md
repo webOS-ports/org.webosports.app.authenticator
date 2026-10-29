@@ -183,9 +183,10 @@ It builds an "Architecture: all" ipk and installs it through
   face; asked first; off with the lock; never used unless turned on; a
   match; face, fingerprint and PIN together; three tries and "Try face
   again"; an empty frame not counted; five misses; a busy camera; let go
-  in the background.
+  in the background. `test_shots` saves pictures of the toast and the
+  dialogs into `build/test-output/ui`, for comparing a change by eye.
 
-`tools/mutation-check.sh` breaks the code in 44 ways, one at a time (the
+`tools/mutation-check.sh` breaks the code in 52 ways, one at a time (the
 hashes, the truncation, Base32, the index, the order of writes, the back
 gesture, the lock and more), and checks that the tests fail for each.
 
@@ -223,8 +224,10 @@ role, manifest and client-permission files granting the groups above
 (see Sound Recorder's `sysbus/`). It has nothing to build and no
 architecture-specific files. RDEPENDS: qml-runner, luneos-components
 (LuneOS.Forms, LuneOS.Components, LuneOS.Service, LuneOS.System,
-LuneOS.Passcode), Qt Quick Controls, Qt Quick Shapes, the key manager and
-luna-authmanager; webos-fingerprint-adapter where the device has a
+LuneOS.Passcode; a version with LuneOS.Components' Toast and
+ConfirmDialog.ask(), and the tests need StatusNotice's
+`noticeCloseButton`), Qt Quick Controls, Qt Quick Shapes, the key manager
+and luna-authmanager; webos-fingerprint-adapter where the device has a
 sensor, and luneos-faced where face unlock is wanted.
 
 ## Licence
