@@ -73,7 +73,7 @@ AppPage {
     // The back gesture: out of a dialog, a menu or reordering first.
     Keys.onEscapePressed: function(event) {
         if (deleteDialog.visible) {
-            deleteDialog.visible = false;
+            deleteDialog.rejected();
             event.accepted = true;
         } else if (reordering) {
             reordering = false;
@@ -243,7 +243,12 @@ AppPage {
             objectName: "deleteMenuItem"
             text: "Delete"
             onTriggered: {
-                deleteDialog.visible = true;
+                var account = page.menuAccount;
+                deleteDialog.ask({
+                    title: "Delete account",
+                    message: "Delete “" + Accounts.title(account) + "”? Without it you cannot make its codes, so turn off two-step verification at the site first, or keep its recovery codes.",
+                    onAccepted: function() { page.store.remove(account.id); }
+                });
                 page.forceActiveFocus();
             }
         }
@@ -254,17 +259,7 @@ AppPage {
         objectName: "deleteDialog"
 
         visible: false
-        title: "Delete account"
-        message: page.menuAccount
-                 ? "Delete “" + Accounts.title(page.menuAccount) + "”? Without it you cannot make its codes, so turn off two-step verification at the site first, or keep its recovery codes."
-                 : ""
         dialogHeight: Units.gu(25)
         dialogWidth: Math.min(Units.gu(40), page.width - Units.gu(4))
-        onAccepted: {
-            visible = false;
-            if (page.menuAccount)
-                page.store.remove(page.menuAccount.id);
-        }
-        onRejected: visible = false
     }
 }

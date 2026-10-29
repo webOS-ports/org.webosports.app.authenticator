@@ -305,7 +305,16 @@ AppPage {
                 text: "Delete account"
                 LuneOSButton.mainColor: LuneOSButton.negativeColor
                 onClicked: {
-                    deleteDialog.visible = true;
+                    deleteDialog.ask({
+                        title: "Delete account",
+                        message: "Delete this account? Without it you cannot make its codes, so turn off two-step verification at the site first, or keep its recovery codes.",
+                        onAccepted: function() {
+                            page.store.remove(page.accountId, function(error) {
+                                if (error === "")
+                                    appWindow.pageStack.pop();
+                            });
+                        }
+                    });
                     // So the back gesture reaches this page and closes it.
                     page.forceActiveFocus();
                 }
@@ -319,7 +328,7 @@ AppPage {
     property bool _escapeTaken: false
     Keys.onEscapePressed: function(event) {
         if (deleteDialog.visible) {
-            deleteDialog.visible = false;
+            deleteDialog.rejected();
             _escapeTaken = true;
             event.accepted = true;
         } else {
@@ -338,17 +347,7 @@ AppPage {
         objectName: "deleteDialog"
 
         visible: false
-        title: "Delete account"
-        message: "Delete this account? Without it you cannot make its codes, so turn off two-step verification at the site first, or keep its recovery codes."
         dialogHeight: Units.gu(25)
         dialogWidth: Math.min(Units.gu(40), page.width - Units.gu(4))
-        onAccepted: {
-            visible = false;
-            page.store.remove(page.accountId, function(error) {
-                if (error === "")
-                    appWindow.pageStack.pop();
-            });
-        }
-        onRejected: visible = false
     }
 }

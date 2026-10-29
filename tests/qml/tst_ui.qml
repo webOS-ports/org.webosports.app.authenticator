@@ -6,6 +6,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtTest
+import LunaNext.Common 0.1
 
 import "../../qml/js/Accounts.js" as Accounts
 
@@ -182,6 +183,35 @@ TestCase {
         mouseClick(findChild(app.header, "saveButton"));
     }
 
+    // Taps the dialog's OK (accept) or Cancel, as a user would.
+    function answer(dialog, accept) {
+        var button = findChild(dialog, accept ? "confirmAcceptButton" : "confirmRejectButton");
+        verify(button !== null && button.visible, "no " + (accept ? "accept" : "reject") + " button");
+        mouseClick(button);
+    }
+
+    // The toast's words while it shows, "" when none is up.
+    function toastText() {
+        var label = findChild(app.contentItem, "toast");
+        verify(label !== null, "no toast label");
+        return label.visible ? label.text : "";
+    }
+
+    // Pictures of the app, for comparing a change by eye; not checked.
+    readonly property string shotDir: decodeURIComponent(Qt.resolvedUrl("../../build/test-output/ui").toString()
+                                                         .replace(/^file:\/\//, ""))
+
+    function shot(name) {
+        waitForRendering(app.contentItem);
+        var done = false;
+        var ok = app.contentItem.grabToImage(function(result) {
+            verify(result.saveToFile(shotDir + "/" + name + ".png"), "save " + name);
+            done = true;
+        });
+        verify(ok, "grab " + name);
+        tryVerify(function() { return done; }, 5000, "saved " + name);
+    }
+
     function backGesture() {
         app.requestActivate();
         tryVerify(function() { return app.active; });
@@ -255,8 +285,18 @@ TestCase {
         pasteTarget.text = "";
         pasteTarget.paste();
         compare(pasteTarget.text, "287082");
-        compare(app.toast, "Copied Example’s code");
-        verify(findChild(app.contentItem, "toast").visible);
+        compare(toastText(), "Copied Example’s code");
+        // At the bottom, over the list.
+        var toast = findChild(app.contentItem, "toast");
+        var bottom = toast.mapToItem(app.contentItem, 0, toast.height).y;
+        verify(bottom > app.contentItem.height - Units.gu(6), "toast not at the bottom: " + bottom);
+        // The app's pill, up at once
+        var box = toast.parent;
+        compare(box.radius, box.height / 2, "a pill");
+        verify(Qt.colorEqual(box.color, "#e0303030"));
+        compare(box.opacity, 1, "no fade");
+        // And goes by itself.
+        tryVerify(function() { return toastText() === ""; }, 4000, "the toast stays");
     }
 
     function test_account_without_secret_says_so() {
@@ -282,7 +322,7 @@ TestCase {
         waitForPage("accountsPage");
         compare(list().count, 1);
         compare(findChild(row(0), "codeLabel").text, "287 082");
-        compare(app.toast, "Added Example");
+        compare(toastText(), "Added Example");
 
         // The secret under its own key, normalized, kept from backups and
         // readable by the app; the index naming it.
@@ -432,13 +472,33 @@ TestCase {
         mouseClick(page().accountMenu.itemAt(1));
         var dialog = findChild(page(), "deleteDialog");
         tryVerify(function() { return dialog.visible; });
+        compare(dialog.title, "Delete account");
         verify(/One/.test(dialog.message));
-        dialog.accepted();
+        answer(dialog, true);
+        verify(!dialog.visible);
         tryCompare(list(), "count", 1);
         compare(findChild(row(0), "titleLabel").text, "Two");
         compare(storedIndex().accounts.length, 1);
         tryVerify(function() { return keymanager.keys[Accounts.secretKeyName("a1")] === undefined; });
         verify(keymanager.keys[Accounts.secretKeyName("a2")] !== undefined);
+    }
+
+    function test_delete_cancelled_keeps_the_account() {
+        makeKeymanager();
+        seed([account("a1", "One", "x"), account("a2", "Two", "y")], { a1: otherSecret, a2: rfcSecret });
+        createApp();
+        mousePress(row(1));
+        tryVerify(function() { return page().accountMenu.opened; }, 3000);
+        mouseRelease(row(1));
+        mouseClick(page().accountMenu.itemAt(1));
+        var dialog = findChild(page(), "deleteDialog");
+        tryVerify(function() { return dialog.visible; });
+        verify(/Two/.test(dialog.message), dialog.message);
+        answer(dialog, false);
+        verify(!dialog.visible);
+        wait(50);
+        compare(list().count, 2);
+        compare(storedIndex().accounts.length, 2);
     }
 
     function test_delete_from_the_editor() {
@@ -447,8 +507,10 @@ TestCase {
         createApp();
         openEditor({ accountId: "a1" });
         mouseClick(findChild(page(), "deleteButton"));
-        verify(findChild(page(), "deleteDialog").visible);
-        findChild(page(), "deleteDialog").accepted();
+        var dialog = findChild(page(), "deleteDialog");
+        verify(dialog.visible);
+        verify(/Delete this account/.test(dialog.message), dialog.message);
+        answer(dialog, true);
         waitForPage("accountsPage");
         verify(findChild(page(), "emptyState").visible);
         compare(storedIndex().accounts.length, 0);
@@ -469,7 +531,7 @@ TestCase {
         tryVerify(function() { return findChild(row(0), "titleLabel").text === "Two"; });
         // Tapping copies nothing while reordering.
         mouseClick(row(2), 10, 10);
-        compare(app.toast, "");
+        compare(toastText(), "");
         verify(findChild(app.header, "doneButton") !== null);
         mouseClick(findChild(app.header, "doneButton"));
         verify(!page().reordering);
@@ -522,9 +584,10 @@ TestCase {
         compare(storeCalls().length, 0);
         // Dismissing the notice tries again.
         keymanager.failMethods = {};
-        notice.dismissed();
+        mouseClick(findChild(notice, "noticeCloseButton"));
         tryCompare(app.store, "status", "ready");
         compare(list().count, 1);
+        verify(!notice.visible);
     }
 
     function test_key_manager_that_never_answers() {
@@ -679,7 +742,7 @@ TestCase {
         tryCompare(app.store, "lockEnabled", true);
         verify(storedIndex().lock);
         compare(storedIndex().accounts.length, 1);
-        compare(app.toast, "Locked when opened");
+        compare(toastText(), "Locked when opened");
         // Turned on from inside, it stays open.
         verify(!app.locked);
         compare(list().count, 1);
@@ -1010,14 +1073,17 @@ TestCase {
         app.toggleFace();
         verify(dialog.visible);
         verify(/good photo of you/.test(dialog.message));
-        dialog.rejected();
+        compare(dialog.title, "Open with a face?");
+        answer(dialog, false);
         verify(!dialog.visible);
+        wait(50);
         verify(!app.store.faceEnabled);
         app.toggleFace();
-        dialog.accepted();
+        answer(dialog, true);
+        verify(!dialog.visible);
         tryCompare(app.store, "faceEnabled", true);
         verify(storedIndex().face);
-        compare(app.toast, "Opened with a face too");
+        compare(toastText(), "Opened with a face too");
         app.toggleFace();
         tryCompare(app.store, "faceEnabled", false);
         verify(!storedIndex().face);
@@ -1166,6 +1232,53 @@ TestCase {
             verify(p.x >= 0 && p.x + item.width <= lockScreen().width, data.tag + ": " + items[i] + " runs off the side");
         }
         verify(lockScreen().width === app.contentItem.width && lockScreen().height === app.contentItem.height);
+    }
+
+    // --- pictures ------------------------------------------------------
+
+    // The toast and the dialogs, as they look, into build/test-output/ui.
+    function test_shots() {
+        makeAuth();
+        auth.faceEnrolled = true;
+        makeKeymanager();
+        seed([account("a1", "Example", "me"), account("a2", "Two", "you")], { a1: rfcSecret, a2: otherSecret },
+             1, 0, true);
+        createApp(59000, 480, 800, false);
+        tryCompare(app.store, "status", "locked");
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        tryCompare(app.store, "status", "ready");
+        tryVerify(function() { return !app.locked; });
+        tryVerify(function() { return row(0) !== null; });
+
+        mouseClick(row(0));
+        tryVerify(function() { return findChild(app.contentItem, "toast").visible; });
+        shot("toast");
+        // Gone by itself, before the dialogs.
+        tryVerify(function() { return !findChild(app.contentItem, "toast").visible; }, 5000);
+
+        mousePress(row(0));
+        tryVerify(function() { return page().accountMenu.opened; }, 3000);
+        mouseRelease(row(0));
+        mouseClick(page().accountMenu.itemAt(1));
+        tryVerify(function() { return findChild(page(), "deleteDialog").visible; });
+        tryVerify(function() { return !page().accountMenu.visible; });
+        shot("delete-from-list");
+        backGesture();
+        tryVerify(function() { return !findChild(page(), "deleteDialog").visible; });
+
+        openEditor({ accountId: "a1" });
+        mouseClick(findChild(page(), "deleteButton"));
+        tryVerify(function() { return findChild(page(), "deleteDialog").visible; });
+        shot("delete-from-editor");
+        backGesture();
+        tryVerify(function() { return !findChild(page(), "deleteDialog").visible; });
+        app.pageStack.pop(null);
+        settle();
+
+        app.toggleFace();
+        tryVerify(function() { return findChild(app.contentItem, "faceDialog").visible; });
+        shot("face");
     }
 
     // --- layout --------------------------------------------------------

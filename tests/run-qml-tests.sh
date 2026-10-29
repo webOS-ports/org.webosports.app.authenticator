@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 LC=${1:-../luneos-components}
 [ $# -gt 0 ] && shift
 # Throwaway settings and cache, under build/ rather than the user's.
-mkdir -p build
+mkdir -p build/test-output/ui
 CONF=$(mktemp -d "$PWD/build/qmltest.XXXXXX")
 trap 'rm -rf "$CONF"' EXIT
 XDG_CONFIG_HOME=$CONF XDG_CACHE_HOME=$CONF/cache QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-offscreen} \

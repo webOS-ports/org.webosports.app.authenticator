@@ -59,8 +59,6 @@ AppWindow {
     property alias appMenu: appMenu
     // Says what went wrong, under the header, until dismissed.
     property string notice: ""
-    // A short "Copied" and the like, that goes by itself.
-    property string toast: ""
     // An otpauth:// link that came before the accounts were read.
     property string pendingLink: ""
 
@@ -159,7 +157,18 @@ AppWindow {
             });
             return;
         }
-        faceDialog.visible = true;
+        faceDialog.ask({
+            title: "Open with a face?",
+            message: "A face is weaker than the passcode: the camera sees only a picture, so someone who "
+                     + "looks like you, or a good photo of you, can sometimes pass. Anyone who opens the "
+                     + "app can see and copy your codes.",
+            onAccepted: function() {
+                accountStore.setFaceEnabled(true, function(error) {
+                    if (error === "")
+                        showToast("Opened with a face too");
+                });
+            }
+        });
     }
 
     function toggleLock() {
@@ -197,15 +206,9 @@ AppWindow {
         clipboardHelper.text = "";
     }
 
+    // A short "Copied" and the like, that goes by itself.
     function showToast(text) {
-        toast = text;
-        toastTimer.restart();
-    }
-
-    Timer {
-        id: toastTimer
-        interval: 2500
-        onTriggered: appWindow.toast = ""
+        toast.show(text);
     }
 
     /*
@@ -329,20 +332,8 @@ AppWindow {
         objectName: "faceDialog"
         parent: appWindow.contentItem
         visible: false
-        title: "Open with a face?"
-        message: "A face is weaker than the passcode: the camera sees only a picture, so someone who "
-                 + "looks like you, or a good photo of you, can sometimes pass. Anyone who opens the "
-                 + "app can see and copy your codes."
         dialogHeight: Units.gu(30)
         dialogWidth: Math.min(Units.gu(40), appWindow.width - Units.gu(4))
-        onAccepted: {
-            visible = false;
-            accountStore.setFaceEnabled(true, function(error) {
-                if (error === "")
-                    appWindow.showToast("Opened with a face too");
-            });
-        }
-        onRejected: visible = false
     }
 
     LockScreen {
@@ -356,25 +347,16 @@ AppWindow {
     }
 
     // "Copied": at the bottom, over the list, for a moment.
-    Rectangle {
-        objectName: "toast"
+    Toast {
+        id: toast
         parent: appWindow.contentItem
-        z: 100
-        visible: appWindow.toast !== ""
+        anchors.centerIn: undefined
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Units.gu(3)
-        width: toastLabel.implicitWidth + Units.gu(4)
-        height: toastLabel.implicitHeight + Units.gu(2)
+        // The app's pill, as it was, there and gone without a fade
         radius: height / 2
         color: "#e0303030"
-
-        Label {
-            id: toastLabel
-            anchors.centerIn: parent
-            color: "white"
-            text: appWindow.toast
-            font.pixelSize: FontUtils.sizeToPixels("medium")
-        }
+        fadeDuration: 0
     }
 }
