@@ -197,21 +197,6 @@ TestCase {
         return label.visible ? label.text : "";
     }
 
-    // Pictures of the app, for comparing a change by eye; not checked.
-    readonly property string shotDir: decodeURIComponent(Qt.resolvedUrl("../../build/test-output/ui").toString()
-                                                         .replace(/^file:\/\//, ""))
-
-    function shot(name) {
-        waitForRendering(app.contentItem);
-        var done = false;
-        var ok = app.contentItem.grabToImage(function(result) {
-            verify(result.saveToFile(shotDir + "/" + name + ".png"), "save " + name);
-            done = true;
-        });
-        verify(ok, "grab " + name);
-        tryVerify(function() { return done; }, 5000, "saved " + name);
-    }
-
     function backGesture() {
         app.requestActivate();
         tryVerify(function() { return app.active; });
@@ -1234,61 +1219,13 @@ TestCase {
         verify(lockScreen().width === app.contentItem.width && lockScreen().height === app.contentItem.height);
     }
 
-    // --- pictures ------------------------------------------------------
-
-    // The toast and the dialogs, as they look, into build/test-output/ui.
-    function test_shots() {
-        makeAuth();
-        auth.faceEnrolled = true;
-        makeKeymanager();
-        seed([account("a1", "Example", "me"), account("a2", "Two", "you")], { a1: rfcSecret, a2: otherSecret },
-             1, 0, true);
-        createApp(59000, 480, 800, false);
-        tryCompare(app.store, "status", "locked");
-        typePin("1357");
-        keyClick(Qt.Key_Return);
-        tryCompare(app.store, "status", "ready");
-        tryVerify(function() { return !app.locked; });
-        tryVerify(function() { return row(0) !== null; });
-
-        mouseClick(row(0));
-        tryVerify(function() { return findChild(app.contentItem, "toast").visible; });
-        shot("toast");
-        // Gone by itself, before the dialogs.
-        tryVerify(function() { return !findChild(app.contentItem, "toast").visible; }, 5000);
-
-        mousePress(row(0));
-        tryVerify(function() { return page().accountMenu.opened; }, 3000);
-        mouseRelease(row(0));
-        mouseClick(page().accountMenu.itemAt(1));
-        tryVerify(function() { return findChild(page(), "deleteDialog").visible; });
-        tryVerify(function() { return !page().accountMenu.visible; });
-        shot("delete-from-list");
-        backGesture();
-        tryVerify(function() { return !findChild(page(), "deleteDialog").visible; });
-
-        openEditor({ accountId: "a1" });
-        mouseClick(findChild(page(), "deleteButton"));
-        tryVerify(function() { return findChild(page(), "deleteDialog").visible; });
-        shot("delete-from-editor");
-        backGesture();
-        tryVerify(function() { return !findChild(page(), "deleteDialog").visible; });
-        app.pageStack.pop(null);
-        settle();
-
-        app.toggleFace();
-        tryVerify(function() { return findChild(app.contentItem, "faceDialog").visible; });
-        shot("face");
-    }
-
     // --- layout --------------------------------------------------------
 
+    // The device screens are tst_screens.qml's, once per profile; this is
+    // a window narrower than any of them, where long names must still fit.
     function test_layout_data() {
         return [
-            { tag: "320x480", w: 320, h: 480 },
-            { tag: "480x800", w: 480, h: 800 },
-            { tag: "720x720", w: 720, h: 720 },
-            { tag: "1024x768", w: 1024, h: 768 }
+            { tag: "320x480", w: 320, h: 480 }
         ];
     }
     function test_layout(data) {
