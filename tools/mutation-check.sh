@@ -5,8 +5,12 @@
 #
 #   [ONLY=<regex>] tools/mutation-check.sh [path to luneos-components]
 #
-# ONLY runs just the mutations whose description matches.
+# ONLY runs just the mutations whose description matches. The screens
+# (tst_screens.qml, once per profile) are left out unless PROFILES names
+# some: none of the mutations is about the layout, and they would take
+# minutes each.
 set -e
+export PROFILES=${PROFILES-}
 cd "$(dirname "$0")/.."
 LC=${1:-../luneos-components}
 SAVE=build/mutation

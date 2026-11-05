@@ -81,6 +81,9 @@ AppPage {
         typeSelector.value = account.type || "totp";
         issuerField.text = account.issuer || "";
         labelField.text = account.label || "";
+        // A long site or name from its start, as the key below.
+        startInView(issuerField);
+        startInView(labelField);
         algorithmSelector.value = account.algorithm || "SHA1";
         digitsSelector.value = account.digits || 6;
         periodField.text = String(account.period || 30);
@@ -92,6 +95,16 @@ AppPage {
         }
         moreSettings.checked = moreSettings.checked || account.type === "hotp"
                 || account.algorithm !== "SHA1" || account.digits !== 6 || account.period !== 30;
+    }
+
+    // A LabelAndTextField has no cursor position of its own: its field's.
+    // The cursor is put at the end with the text, and the right-aligned
+    // field then shows only the end of a long one.
+    function startInView(row) {
+        for (var i = 0; i < row.children.length; i++) {
+            if (row.children[i].cursorPosition !== undefined)
+                row.children[i].cursorPosition = 0;
+        }
     }
 
     // The back gesture comes as Escape to whatever has the focus.

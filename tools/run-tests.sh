@@ -1,7 +1,8 @@
 #!/bin/sh
 # Every host test: the JavaScript under Node (vectors, and OpenSSL as a
-# second opinion), then the QML tests in QML's own engine (tst_otp.qml)
-# and the app's pages (tst_ui.qml).
+# second opinion), then the QML tests in QML's own engine (tst_otp.qml),
+# the app's pages (tst_ui.qml) and every screen once per device profile
+# (tst_screens.qml, pictures in build/test-output/ui).
 #
 #   tools/run-tests.sh [path to luneos-components]
 #
@@ -15,5 +16,5 @@ echo "== Node"
 node tests/js/run-node-tests.js || status=1
 echo "== QML"
 out=$(tests/run-qml-tests.sh "$LC" 2>&1) || status=1
-echo "$out" | grep -E "^(FAIL|Totals)|^   (Actual|Expected|Loc)" || true
+echo "$out" | grep -E "^(FAIL|XFAIL|XPASS|Totals)|^   (Actual|Expected|Loc)" || true
 exit $status

@@ -172,9 +172,9 @@ It builds an "Architecture: all" ipk and installs it through
   before the accounts are read; editing with and without a new key;
   deleting; reordering; counter-based codes; a key manager that refuses
   or never answers; the two index keys and a damaged one; a failed write;
-  the back gesture; the app menu; the layout at 320x480, 480x800, 720x720
-  and 1024x768. The lock, with `FakeAuth.qml` in place of luna-authmanager
-  and the fingerprint service: no secret read while locked; PIN (pad and
+  the back gesture; the app menu; the layout in a 320x480 window. The
+  lock, with `FakeAuth.qml` in place of luna-authmanager and the
+  fingerprint service: no secret read while locked; PIN (pad and
   keyboard), password and pattern; wrong passcodes and the lockout; a
   refused check; no passcode set; a fingerprint that matches, misses,
   times out and is disarmed in the background; locking again after a
@@ -183,8 +183,23 @@ It builds an "Architecture: all" ipk and installs it through
   face; asked first; off with the lock; never used unless turned on; a
   match; face, fingerprint and PIN together; three tries and "Try face
   again"; an empty frame not counted; five misses; a busy camera; let go
-  in the background. `test_shots` saves pictures of the toast and the
-  dialogs into `build/test-output/ui`, for comparing a change by eye.
+  in the background.
+- `tests/qml/tst_screens.qml` (qmltestrunner, once per device screen):
+  every screen as a user gets to it - first start, the accounts, the
+  toast, the account menu and its delete dialog, reordering, the app menu
+  (also with the lock and face), the face dialog, the key manager's
+  refusal, adding (empty, with the problems, with more settings), a
+  link, editing and its delete dialog, and the lock with a PIN (also
+  wrong), a password, a pattern and a face. Each is checked for being
+  shown, not empty and inside the window, and saved as
+  `build/test-output/ui/<profile>-<screen>.png`, with the panel's notch
+  and rounded corners painted black over it where the profile has them
+  (`PanelShape.qml`). The profiles are luneos-components' desktop
+  stand-ins: `mindphone` (480x800), `q25` (720x720), `tp` (1024x768) and
+  `radon` (720x1600, notch and rounded corners); `PROFILES="q25 tp"`
+  picks others, `QML_TESTS=` leaves out the tests run once. The lock
+  screen has to fit the window without scrolling, the Q25's square too,
+  and a long site and name in the editor show from their start.
 
 `tools/mutation-check.sh` breaks the code in 52 ways, one at a time (the
 hashes, the truncation, Base32, the index, the order of writes, the back
