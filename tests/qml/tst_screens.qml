@@ -195,22 +195,13 @@ TestCase {
                    label + " runs off the bottom: y " + p.y + ", height " + item.height + " of " + app.height);
     }
 
-    // The whole of it in the window, top to bottom too, as one check, so
-    // a known overflow can be expected to fail on the screen it is on.
-    function inWindow(item) {
-        var p = item.mapToItem(null, 0, 0);
-        return item.visible && item.width > 0 && item.height > 0 && p.x >= -0.5 && p.y >= -0.5
-            && p.x + item.width <= app.width + 0.5 && p.y + item.height <= app.height + 0.5;
-    }
-
-    // On the Q25 (720x720 at grid unit 16) the lock screen is taller than
-    // the window: the last of it has to be scrolled to.
-    function lockFits(item, label) {
-        onScreen(item, label, true);
-        if (profile === "q25")
-            expectFailContinue("", "the lock screen is taller than the Q25's window: " + label + " runs off the bottom");
-        verify(inWindow(item), label + " runs off the bottom: y " + item.mapToItem(null, 0, 0).y
-                               + ", height " + item.height + " of " + app.height);
+    // The lock screen, the last of it too, in the window without
+    // scrolling - on the Q25's square (720x720 at grid unit 16) as well.
+    function lockFits(lock, item, label) {
+        onScreen(item, label);
+        var flick = flickableIn(lock);
+        verify(flick.contentHeight <= flick.height + 0.5,
+               "the lock screen has to be scrolled: " + flick.contentHeight + " of " + flick.height);
     }
 
     // contentWidth is -1 unless set, so what the content holds counts too.
@@ -426,6 +417,18 @@ TestCase {
             onScreen(findChild(page(), fields[i]), label + ": " + fields[i], true);
     }
 
+    // A LabelAndTextField's field shows the first character at its left.
+    function startShown(row, label) {
+        var field = null;
+        for (var i = 0; i < row.children.length && !field; i++)
+            if (row.children[i].positionAt !== undefined)
+                field = row.children[i];
+        verify(field, "no field in " + label);
+        verify(field.contentWidth > field.width - field.leftPadding - field.rightPadding,
+               label + " is not long enough to test: " + field.contentWidth + " in " + field.width);
+        compare(field.positionAt(field.leftPadding + 1, field.height / 2), 0, label + " does not show its start");
+    }
+
     function test_add() {
         createApp();
         mouseClick(findChild(app.header, "addButton"));
@@ -477,6 +480,9 @@ TestCase {
         var flick = flickableIn(page());
         var del = findChild(page(), "deleteButton");
         onScreen(del, "Delete", true);
+        // The long site and name from their start, not their end.
+        startShown(findChild(page(), "issuerField"), "the site");
+        startShown(findChild(page(), "labelField"), "the name");
         shot("edit");
         if (flick) {
             flick.contentY = Math.max(0, flick.contentHeight - flick.height);
@@ -517,7 +523,7 @@ TestCase {
         var lock = createLocked("pin");
         shot("lock-pin");
         onScreen(findChild(lock, "pinPad"), "the PIN pad");
-        lockFits(findChild(lock, "unlockButton"), "Unlock");
+        lockFits(lock, findChild(lock, "unlockButton"), "Unlock");
 
         lock.submit("0000");
         tryVerify(function() { return findChild(lock, "lockMessage").text.indexOf("not") >= 0; }, 3000);
@@ -535,7 +541,7 @@ TestCase {
     function test_lock_pattern() {
         var lock = createLocked("pattern");
         shot("lock-pattern");
-        lockFits(findChild(lock, "patternGrid"), "the pattern grid");
+        lockFits(lock, findChild(lock, "patternGrid"), "the pattern grid");
     }
 
     function test_lock_face() {
@@ -543,6 +549,7 @@ TestCase {
         tryVerify(function() { return findChild(lock, "faceStatus").visible; }, 3000);
         shot("lock-face");
         onScreen(findChild(lock, "faceStatus"), "the face status");
-        lockFits(findChild(lock, "pinPad"), "the PIN pad");
+        lockFits(lock, findChild(lock, "pinPad"), "the PIN pad");
+        lockFits(lock, findChild(lock, "unlockButton"), "Unlock");
     }
 }

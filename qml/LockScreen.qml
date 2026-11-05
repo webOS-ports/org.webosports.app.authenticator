@@ -45,6 +45,10 @@ Rectangle {
     property int lockoutLeft: 0
     readonly property bool lockedOut: lockoutLeft > 0
     readonly property bool canEnter: !checking && !lockedOut && auth !== null && auth.hasPasscode
+    // A short window (the Q25's square): no icon, less room between the
+    // parts and a smaller pad and grid, so that all of it, Unlock too,
+    // fits without scrolling.
+    readonly property bool compact: height < Units.gu(60)
 
     signal unlocked()
 
@@ -186,18 +190,20 @@ Rectangle {
 
     Flickable {
         anchors.fill: parent
-        contentHeight: Math.max(height, column.implicitHeight + Units.gu(4))
+        contentHeight: Math.max(height, column.implicitHeight + 2 * column.margin)
         boundsBehavior: Flickable.StopAtBounds
         clip: true
 
         Column {
             id: column
-            y: Math.max(Units.gu(2), (parent.height - implicitHeight) / 2)
+            readonly property real margin: lockScreen.compact ? Units.gu(1) : Units.gu(2)
+            y: Math.max(margin, (parent.height - implicitHeight) / 2)
             width: parent.width
-            spacing: Units.gu(1.5)
+            spacing: lockScreen.compact ? Units.gu(1) : Units.gu(1.5)
 
             Image {
                 anchors.horizontalCenter: parent.horizontalCenter
+                visible: !lockScreen.compact
                 source: Qt.resolvedUrl("../icon.png")
                 width: Units.gu(6)
                 height: width
@@ -250,7 +256,7 @@ Rectangle {
                 objectName: "pinDots"
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: lockScreen.auth !== null && lockScreen.auth.lockMode === "pin"
-                height: Units.gu(4)
+                height: lockScreen.compact ? Units.gu(3) : Units.gu(4)
                 verticalAlignment: Text.AlignVCenter
                 color: "white"
                 font.pixelSize: FontUtils.sizeToPixels("x-large")
@@ -262,7 +268,7 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: lockScreen.auth !== null && lockScreen.auth.lockMode === "pin"
                 enabled: lockScreen.canEnter
-                width: Math.min(Units.gu(32), lockScreen.width - Units.gu(4))
+                width: Math.min(lockScreen.compact ? Units.gu(26) : Units.gu(32), lockScreen.width - Units.gu(4))
                 onKeyAction: function(keyText) {
                     if (keyText === "\b")
                         lockScreen.pin = lockScreen.pin.slice(0, -1);
@@ -290,7 +296,7 @@ Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: lockScreen.auth !== null && lockScreen.auth.lockMode === "pattern"
                 enabled: lockScreen.canEnter
-                width: Math.min(Units.gu(28), lockScreen.width - Units.gu(4))
+                width: Math.min(lockScreen.compact ? Units.gu(24) : Units.gu(28), lockScreen.width - Units.gu(4))
                 height: width
                 onPatternDrawn: function(encoded) { lockScreen.submit(encoded); }
                 onTooShort: {

@@ -197,10 +197,9 @@ It builds an "Architecture: all" ipk and installs it through
   (`PanelShape.qml`). The profiles are luneos-components' desktop
   stand-ins: `mindphone` (480x800), `q25` (720x720), `tp` (1024x768) and
   `radon` (720x1600, notch and rounded corners); `PROFILES="q25 tp"`
-  picks others, `QML_TESTS=` leaves out the tests run once. On the Q25
-  the lock screen is taller than the window (the Unlock key, the bottom
-  of the pattern and, with a face, of the PIN pad run off it): those
-  checks are expected failures there (XFAIL) until it fits.
+  picks others, `QML_TESTS=` leaves out the tests run once. The lock
+  screen has to fit the window without scrolling, the Q25's square too,
+  and a long site and name in the editor show from their start.
 
 `tools/mutation-check.sh` breaks the code in 52 ways, one at a time (the
 hashes, the truncation, Base32, the index, the order of writes, the back
