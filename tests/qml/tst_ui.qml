@@ -9,6 +9,8 @@ import QtTest
 import LunaNext.Common 0.1
 
 import "../../qml/js/Accounts.js" as Accounts
+import "../../qml/js/Base32.js" as Base32
+import "../../qml/js/Migration.js" as Migration
 
 /*
  * The app itself - qml/main.qml and its pages - on the build host, with
@@ -409,6 +411,388 @@ TestCase {
         verify(/only opens otpauth/.test(app.notice));
     }
 
+    // --- another authenticator's export (otpauth-migration://) ----------
+
+    // An export link of these accounts, with these keys (Base32).
+    function exportLink(accounts, secrets, batchIndex, batchSize) {
+        var parts = accounts.map(function(a) {
+            return Migration.accountBytes(a, Base32.decode(secrets[a.id]));
+        });
+        return Migration.link(parts, batchSize || 1, batchIndex || 0, 99);
+    }
+
+    function importRows() {
+        var out = [];
+        for (var i = 0; ; i++) {
+            var r = findChild(page(), "importRow" + i);
+            if (!r)
+                return out;
+            out.push({ title: findChild(r, "importTitle").text, note: findChild(r, "importNote").text });
+        }
+    }
+
+    function secretKeys() {
+        return Object.keys(keymanager.keys).filter(function(k) { return k.indexOf("otp.secret.") === 0; });
+    }
+
+    function test_import_offers_the_exported_accounts() {
+        createApp(59000);
+        var link = exportLink([account("x", "Example", "alice", { digits: 8 }),
+                               account("y", "", "bob"),
+                               account("z", "Counter", "carol", { type: "hotp", counter: 7 })],
+                              { x: rfcSecret, y: otherSecret, z: rfcSecret });
+        app.launchParams = JSON.stringify({ target: link });
+        waitForPage("importPage");
+        compare(importRows(), [{ title: "Example", note: "" }, { title: "bob", note: "" }, { title: "Counter", note: "" }]);
+        verify(/check that these are your accounts/.test(findChild(page(), "importExplanation").text));
+        verify(!/QR codes/.test(findChild(page(), "importExplanation").text));
+        // Nothing stored until Add.
+        compare(storeCalls().length, 0);
+        var add = findChild(app.header, "importButton");
+        verify(add.enabled);
+        mouseClick(add);
+        waitForPage("accountsPage");
+        compare(toastText(), "Added 3 accounts");
+        compare(list().count, 3);
+        compare(findChild(row(0), "codeLabel").text, "9428 7082");
+        compare(storedIndex().accounts.map(function(a) { return [a.issuer, a.label, a.type, a.counter]; }),
+                [["Example", "alice", "totp", 0], ["", "bob", "totp", 0], ["Counter", "carol", "hotp", 7]]);
+        // Three secrets, then one index: written once, not once per account.
+        var writes = storeCalls().filter(function(c) { return c.method === "store"; });
+        compare(writes.length, 4);
+        compare(writes.filter(function(c) { return c.args.keyname.indexOf("otp.index.") === 0; }).length, 1);
+        compare(writes[3].args.keyname.indexOf("otp.index."), 0, "the index after the secrets");
+        writes.forEach(function(c) { verify(c.args.noexport === true && c.args.nohide === true); });
+        compare(secretKeys().length, 3);
+    }
+
+    function test_import_shows_what_is_there_and_what_cannot_be_used() {
+        makeKeymanager();
+        seed([account("a1", "Example", "alice")], { a1: rfcSecret });
+        createApp(59000);
+        var md5 = [];
+        Migration.writeBytes(md5, 1, Base32.decode(otherSecret));
+        Migration.writeBytes(md5, 2, Migration.utf8Encode("Old"));
+        Migration.writeNumber(md5, 4, 4);
+        var parts = [Migration.accountBytes(account("x", "example", "Alice"), Base32.decode(rfcSecret)), md5,
+                     Migration.accountBytes(account("y", "New", "me"), Base32.decode(otherSecret)),
+                     Migration.accountBytes(account("z", "New", "me"), Base32.decode(otherSecret))];
+        app.openLink(Migration.link(parts, 3, 1, 5));
+        waitForPage("importPage");
+        var rows = importRows();
+        compare(rows.length, 4);
+        compare(rows[0], { title: "example", note: "Already here" });
+        compare(rows[1].title, "Old");
+        verify(/MD5/.test(rows[1].note), rows[1].note);
+        compare(rows[2], { title: "New", note: "" });
+        // The same account twice in one export: added once.
+        compare(rows[3], { title: "New", note: "Already here" });
+        verify(/3 QR codes, at most 10 accounts in each; this is code 2\. Scan codes 1 and 3 after this one\./
+               .test(findChild(page(), "importExplanation").text), findChild(page(), "importExplanation").text);
+        mouseClick(findChild(app.header, "importButton"));
+        waitForPage("accountsPage");
+        compare(toastText(), "Added New; now scan code 1 of 3");
+        compare(list().count, 2);
+        compare(secretKeys().length, 2);
+    }
+
+    function test_import_with_nothing_new() {
+        makeKeymanager();
+        seed([account("a1", "Example", "alice")], { a1: rfcSecret });
+        createApp();
+        app.openLink(exportLink([account("x", "Example", "alice")], { x: rfcSecret }));
+        waitForPage("importPage");
+        verify(!findChild(app.header, "importButton").enabled);
+        verify(/nothing new/.test(findChild(page(), "importExplanation").text));
+        page().add();
+        wait(50);
+        compare(storeCalls().length, 0);
+    }
+
+    // The index cannot be written: no account added, and no secret left.
+    function test_import_not_saved_adds_nothing() {
+        makeKeymanager();
+        seed([account("a1", "Example", "alice")], { a1: rfcSecret });
+        createApp();
+        keymanager.failStoreOf = "otp.index.";
+        app.openLink(exportLink([account("x", "One", "a"), account("y", "Two", "b")], { x: rfcSecret, y: otherSecret }));
+        waitForPage("importPage");
+        mouseClick(findChild(app.header, "importButton"));
+        tryVerify(function() { return /could not be saved/.test(app.notice); });
+        compare(page().objectName, "importPage");
+        tryVerify(function() { return secretKeys().length === 1; }, 5000, "the stored secrets removed again");
+        compare(storedIndex().accounts.length, 1);
+        compare(app.store.accounts.length, 1);
+        // A secret that cannot be stored: nothing after it is tried.
+        keymanager.failStoreOf = "otp.secret.";
+        var before = storeCalls().length;
+        mouseClick(findChild(app.header, "importButton"));
+        tryVerify(function() { return !page().saving; });
+        compare(storeCalls().length, before + 1);
+        compare(secretKeys().length, 1);
+    }
+
+    function test_import_link_waits_for_the_lock() {
+        createLocked();
+        app.openLink(exportLink([account("x", "Linked", "me")], { x: otherSecret }));
+        compare(app.pageStack.depth, 1);
+        typePin("1357");
+        keyClick(Qt.Key_Return);
+        waitForPage("importPage");
+        compare(importRows()[0].title, "Linked");
+    }
+
+    function test_pasted_export_link_opens_the_import() {
+        createApp();
+        openEditor({});
+        findChild(page(), "secretField").text = exportLink([account("x", "Pasted", "me")], { x: otherSecret });
+        waitForPage("importPage");
+        compare(importRows()[0].title, "Pasted");
+        compare(app.pageStack.depth, 2, "the editor is left, not kept under the import");
+    }
+
+    // Google Authenticator puts at most 10 accounts in a code: an export of
+    // 25 is three codes, each imported on its own; the app says which are
+    // still to come.
+    function test_import_of_several_codes() {
+        createApp();
+        var accounts = [], secrets = {};
+        for (var i = 0; i < 25; i++) {
+            accounts.push(account("x" + i, "Site " + i, "me"));
+            secrets["x" + i] = i % 2 ? rfcSecret : otherSecret;
+        }
+        function code(index) {
+            return exportLink(accounts.slice(index * 10, index * 10 + 10), secrets, index, 3);
+        }
+        function explanation() {
+            return findChild(page(), "importExplanation").text;
+        }
+        app.openLink(code(0));
+        waitForPage("importPage");
+        verify(/this is code 1\. Scan codes 2 and 3 after this one\./.test(explanation()), explanation());
+        compare(importRows().length, 10);
+        mouseClick(findChild(app.header, "importButton"));
+        waitForPage("accountsPage");
+        compare(toastText(), "Added 10 accounts; now scan code 2 of 3");
+        app.openLink(code(2));
+        waitForPage("importPage");
+        verify(/this is code 3\. Code 1 is in already\. Scan code 2 after this one\./.test(explanation()), explanation());
+        mouseClick(findChild(app.header, "importButton"));
+        waitForPage("accountsPage");
+        compare(toastText(), "Added 5 accounts; now scan code 2 of 3");
+        app.openLink(code(1));
+        waitForPage("importPage");
+        verify(/this is code 2\. Codes 1 and 3 are in already\.$/.test(explanation()), explanation());
+        mouseClick(findChild(app.header, "importButton"));
+        waitForPage("accountsPage");
+        compare(toastText(), "Added 10 accounts; all 3 codes of the export are in");
+        compare(list().count, 25);
+        compare(storedIndex().accounts.map(function(a) { return a.issuer; }).sort(),
+                accounts.map(function(a) { return a.issuer; }).sort());
+        // A code again: nothing new, and the others still counted as in.
+        app.openLink(code(1));
+        waitForPage("importPage");
+        verify(!findChild(app.header, "importButton").enabled);
+        verify(/nothing new.*Codes 1 and 3 are in already\.$/.test(explanation()), explanation());
+    }
+
+    // Another export (another batch id) starts its own count.
+    function test_import_codes_counted_per_export() {
+        createApp();
+        app.openLink(Migration.link([Migration.accountBytes(account("x", "A", "me"), Base32.decode(rfcSecret))], 2, 0, 1));
+        waitForPage("importPage");
+        mouseClick(findChild(app.header, "importButton"));
+        waitForPage("accountsPage");
+        app.openLink(Migration.link([Migration.accountBytes(account("y", "B", "me"), Base32.decode(rfcSecret))], 2, 1, 2));
+        waitForPage("importPage");
+        verify(!/in already/.test(findChild(page(), "importExplanation").text));
+        verify(/Scan code 1 after this one/.test(findChild(page(), "importExplanation").text));
+    }
+
+    function clickImportFromClipboard() {
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        var item = findChild(app.appMenu.contentItem, "importClipboardMenuItem") || app.appMenu.itemAt(6);
+        compare(item.text, "Import from clipboard");
+        verify(item.enabled);
+        mouseClick(item);
+    }
+
+    // The Camera's Copy, then the app menu.
+    function test_import_from_clipboard() {
+        createApp();
+        app.copyText(exportLink([account("x", "Copied", "me")], { x: otherSecret }));
+        clickImportFromClipboard();
+        waitForPage("importPage");
+        compare(importRows()[0].title, "Copied");
+        // An otpauth:// link goes to the editor, as a launch would.
+        app.pageStack.pop(null);
+        settle();
+        app.copyText("  otpauth://totp/Single:me?secret=" + otherSecret + "  ");
+        clickImportFromClipboard();
+        waitForPage("editAccountPage");
+        compare(findChild(page(), "issuerField").text, "Single");
+        // Anything else says what to do.
+        app.pageStack.pop(null);
+        settle();
+        app.copyText("hello");
+        clickImportFromClipboard();
+        compare(page().objectName, "accountsPage");
+        verify(/no export to import/.test(app.notice), app.notice);
+        // The clipboard is left as it was.
+        pasteTarget.text = "";
+        pasteTarget.paste();
+        compare(pasteTarget.text, "hello");
+    }
+
+    function test_bad_export_link_says_why() {
+        createApp();
+        app.openLink("otpauth-migration://offline?data=!!!");
+        compare(page().objectName, "accountsPage");
+        verify(/garbled/.test(app.notice), app.notice);
+        app.openLink("otpauth-migration://offline?data=");
+        verify(/no accounts/.test(app.notice), app.notice);
+    }
+
+    // --- export --------------------------------------------------------
+
+    function openExport() {
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        var item = findChild(app.appMenu.contentItem, "exportMenuItem") || app.appMenu.itemAt(5);
+        verify(item.enabled);
+        mouseClick(item);
+        waitForPage("exportPage");
+    }
+
+    function test_export_needs_accounts() {
+        createApp();
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        verify(!app.appMenu.itemAt(5).enabled);
+        compare(app.appMenu.itemAt(5).text, "Export accounts");
+    }
+
+    function test_export_shows_the_chosen_accounts_as_codes() {
+        makeKeymanager();
+        var accounts = [account("a1", "Example", "alice", { digits: 8 }), account("a2", "Mail", "me", { algorithm: "SHA256" }),
+                        account("h1", "Counter", "bob", { type: "hotp", counter: 12 }),
+                        account("s1", "Slow", "x", { period: 60 }), account("d7", "Seven", "x", { digits: 7 }),
+                        account("g1", "Gone", "x")];
+        seed(accounts, { a1: rfcSecret, a2: otherSecret, h1: rfcSecret, s1: rfcSecret, d7: rfcSecret });
+        createApp();
+        openExport();
+        verify(/whoever reads them can make your codes/.test(findChild(page(), "exportExplanation").text));
+        compare(page().exportable.map(function(a) { return a.id; }), ["a1", "a2", "h1"]);
+        compare(page().notExportable.map(function(a) { return a.id; }), ["s1", "d7", "g1"]);
+        compare(page().reason(accounts[3]), "Codes that change every 60 seconds cannot be exported.");
+        compare(page().reason(accounts[4]), "Codes of 7 digits cannot be exported.");
+        compare(page().reason(accounts[5]), "Its key is missing.");
+        // Leave Mail out.
+        var mail = findChild(page(), "exportSwitch1");
+        verify(mail.checked);
+        mouseClick(mail);
+        verify(!mail.checked);
+        compare(page().chosen.map(function(a) { return a.id; }), ["a1", "h1"]);
+        compare(page().codes.length, 0, "no code before Show codes");
+        mouseClick(findChild(app.header, "showCodesButton"));
+        tryCompare(page(), "step", "codes");
+        var qr = findChild(page(), "qrCode");
+        verify(qr.visible);
+        compare(page().codes.length, 1);
+        var parsed = Migration.parse(qr.text);
+        compare(parsed.entries.map(function(e) { return [e.account.issuer, e.account.label, e.account.secret,
+                                                          e.account.type, e.account.digits, e.account.counter]; }),
+                [["Example", "alice", rfcSecret, "totp", 8, 0], ["Counter", "bob", rfcSecret, "hotp", 6, 12]]);
+        compare(findChild(page(), "codeCaption").text, "Example, Counter");
+        verify(!findChild(page(), "nextCodeButton").visible, "one code: no Next");
+        // Nothing written by exporting.
+        compare(storeCalls().length, 0);
+        // The back gesture goes back to the choice and drops the codes.
+        backGesture();
+        compare(page().objectName, "exportPage");
+        compare(page().step, "choose");
+        compare(page().codes.length, 0);
+        compare(qr.text, "");
+    }
+
+    function test_export_of_many_accounts_in_several_codes() {
+        makeKeymanager();
+        var accounts = [], secrets = {};
+        for (var i = 0; i < 23; i++) {
+            accounts.push(account("a" + i, "Site " + i, "user" + i + "@example.com"));
+            secrets["a" + i] = i % 2 ? rfcSecret : otherSecret;
+        }
+        seed(accounts, secrets);
+        createApp();
+        openExport();
+        mouseClick(findChild(app.header, "showCodesButton"));
+        tryCompare(page(), "step", "codes");
+        var n = page().codes.length;
+        verify(n >= 3, n + " codes");
+        var qr = findChild(page(), "qrCode");
+        var next = findChild(page(), "nextCodeButton");
+        var previous = findChild(page(), "previousCodeButton");
+        verify(next.visible && next.enabled && !previous.enabled);
+        var seen = [];
+        for (var c = 0; c < n; c++) {
+            var parsed = Migration.parse(qr.text);
+            compare(parsed.batchIndex, c);
+            compare(parsed.batchSize, n);
+            verify(new RegExp("^Code " + (c + 1) + " of " + n + ": ").test(findChild(page(), "codeCaption").text));
+            seen = seen.concat(parsed.entries.map(function(e) { return e.account.issuer; }));
+            if (c < n - 1)
+                mouseClick(next);
+        }
+        verify(!next.enabled && previous.enabled);
+        compare(seen, accounts.map(function(a) { return a.issuer; }));
+        mouseClick(previous);
+        compare(page().current, n - 2);
+    }
+
+    // Taken off the screen when the app goes to the background.
+    function test_export_codes_hidden_in_the_background() {
+        makeKeymanager();
+        seed([account("a1", "Example", "alice")], { a1: rfcSecret });
+        createApp();
+        openExport();
+        mouseClick(findChild(app.header, "showCodesButton"));
+        tryCompare(page(), "step", "codes");
+        verify(findChild(page(), "qrCode").text !== "");
+        app.inFront = false;
+        compare(page().step, "choose");
+        compare(page().codes.length, 0);
+        compare(findChild(page(), "qrCode").text, "");
+        app.inFront = true;
+        compare(page().step, "choose", "not shown again by itself");
+    }
+
+    // Out of one app and into another, as from one phone to the next.
+    function test_export_and_import_again() {
+        makeKeymanager();
+        var accounts = [account("a1", "Example", "alice@example.com", { digits: 8 }),
+                        account("a2", "Ünïcødé 日本", "me", { algorithm: "SHA512" }),
+                        account("h1", "Counter", "bob", { type: "hotp", counter: 3 })];
+        seed(accounts, { a1: rfcSecret, a2: otherSecret, h1: rfcSecret });
+        createApp(59000);
+        var codesBefore = [findChild(row(0), "codeLabel").text, findChild(row(1), "codeLabel").text];
+        openExport();
+        mouseClick(findChild(app.header, "showCodesButton"));
+        tryCompare(page(), "step", "codes");
+        var link = findChild(page(), "qrCode").text;
+        cleanup();
+        createApp(59000);
+        app.openLink(link);
+        waitForPage("importPage");
+        mouseClick(findChild(app.header, "importButton"));
+        waitForPage("accountsPage");
+        compare(list().count, 3);
+        compare([findChild(row(0), "codeLabel").text, findChild(row(1), "codeLabel").text], codesBefore);
+        compare(storedIndex().accounts.map(function(a) {
+            return [a.issuer, a.label, a.algorithm, a.digits, a.type, a.counter]; }),
+                accounts.map(function(a) { return [a.issuer, a.label, a.algorithm, a.digits, a.type, a.counter]; }));
+    }
+
     // --- changing ------------------------------------------------------
 
     function test_edit_keeps_the_secret() {
@@ -466,6 +850,79 @@ TestCase {
         compare(storedIndex().accounts.length, 1);
         tryVerify(function() { return keymanager.keys[Accounts.secretKeyName("a1")] === undefined; });
         verify(keymanager.keys[Accounts.secretKeyName("a2")] !== undefined);
+    }
+
+    // --- swipe to delete ------------------------------------------------
+
+    function swipeRow(r, fraction) {
+        mouseDrag(r, r.width * 0.2, r.height / 2, r.width * fraction, 0, Qt.LeftButton, Qt.NoModifier, 5);
+    }
+
+    function test_swipe_far_asks_then_deletes() {
+        makeKeymanager();
+        seed([account("a1", "One", "x"), account("a2", "Two", "y")], { a1: otherSecret, a2: rfcSecret });
+        createApp();
+        var r = row(0);
+        swipeRow(r, 0.6);
+        var del = findChild(r, "swipeDeleteButton");
+        tryVerify(function() { return del.visible; }, 2000, "no Delete after a long swipe");
+        compare(storeCalls().length, 0, "deleted before confirming");
+        compare(toastText(), "", "the swipe copied the code");
+        mouseClick(del);
+        tryCompare(list(), "count", 1);
+        compare(storedIndex().accounts.map(function(a) { return a.id; }), ["a2"]);
+        verify(keymanager.keys[Accounts.secretKeyName("a1")] === undefined, "the secret is left");
+        compare(toastText(), "Deleted One");
+    }
+
+    function test_swipe_then_cancel_keeps_it() {
+        makeKeymanager();
+        seed([account("a1", "One", "x")], { a1: otherSecret });
+        createApp();
+        var r = row(0);
+        swipeRow(r, -0.6);
+        var cancel = findChild(r, "swipeCancelButton");
+        tryVerify(function() { return cancel.visible; }, 2000);
+        mouseClick(cancel);
+        tryVerify(function() { return !cancel.visible; });
+        verify(findChild(r, "codeLabel").visible);
+        compare(storeCalls().length, 0);
+        compare(list().count, 1);
+        // And a tap copies again.
+        mouseClick(r);
+        compare(toastText(), "Copied One’s code");
+    }
+
+    function test_short_swipe_springs_back() {
+        makeKeymanager();
+        seed([account("a1", "One", "x")], { a1: otherSecret });
+        createApp();
+        var r = row(0);
+        // Short of 4 grid units.
+        mouseDrag(r, r.width * 0.2, r.height / 2, Units.gu(3), 0, Qt.LeftButton, Qt.NoModifier, 5);
+        tryCompare(findChild(r, "rowSlide"), "x", 0);
+        verify(!findChild(r, "swipeDeleteButton").visible);
+        compare(toastText(), "", "the swipe copied the code");
+        compare(storeCalls().length, 0);
+    }
+
+    function test_no_swipe_while_reordering() {
+        makeKeymanager();
+        seed([account("a1", "One", "x"), account("a2", "Two", "y")], { a1: otherSecret, a2: rfcSecret });
+        createApp();
+        page().reordering = true;
+        var r = row(0);
+        swipeRow(r, 0.6);
+        wait(300);
+        verify(!findChild(r, "swipeDeleteButton").visible);
+        compare(findChild(r, "rowSlide").x, 0);
+        // Asked, then reordering: the question goes.
+        page().reordering = false;
+        swipeRow(r, 0.6);
+        tryVerify(function() { return findChild(r, "swipeDeleteButton").visible; }, 2000);
+        page().reordering = true;
+        verify(!findChild(r, "swipeDeleteButton").visible);
+        compare(storeCalls().length, 0);
     }
 
     function test_delete_cancelled_keeps_the_account() {
@@ -672,7 +1129,7 @@ TestCase {
         createApp();
         app.appMenu.popup(0, 0);
         tryVerify(function() { return app.appMenu.opened; });
-        compare(app.appMenu.count, 5);
+        compare(app.appMenu.count, 7);
         mouseClick(app.appMenu.itemAt(2));
         verify(page().reordering);
     }

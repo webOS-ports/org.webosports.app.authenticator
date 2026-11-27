@@ -48,7 +48,7 @@ AppPage {
     explanationOnShortScreen: false
     explanation: reordering ? ""
                : store.status === "ready" && store.accounts.length > 0
-                 ? "Tap a code to copy it; touch and hold an account to edit or delete it." : ""
+                 ? "Tap a code to copy it; touch and hold an account to edit it, swipe it away to delete it." : ""
 
     headerAction: reordering ? doneAction : (store.status === "ready" ? addAction : null)
 
@@ -178,6 +178,13 @@ AppPage {
                 });
             }
             onMoveRequested: function(to) { page.store.move(index, to); }
+            onDeleteRequested: {
+                var name = Accounts.title(account);
+                page.store.remove(accountId, function(error) {
+                    if (error === "")
+                        appWindow.showToast("Deleted " + name);
+                });
+            }
         }
     }
 

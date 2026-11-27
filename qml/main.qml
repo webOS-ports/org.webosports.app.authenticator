@@ -27,12 +27,15 @@ import LuneOS.Forms 1.0
 import LuneOS.Components 1.0
 
 import "js/OtpAuthUri.js" as OtpAuthUri
+import "js/Migration.js" as Migration
 
 /*
  * Authenticator: the one-time codes for signing in with two-step
  * verification, time-based (TOTP) and counter-based (HOTP). Accounts come
  * from an otpauth:// link - a QR code read by the Camera opens here - or
- * are typed in.
+ * are typed in, or come several at a time from another authenticator's
+ * export (otpauth-migration://, Google Authenticator's "Transfer
+ * accounts"). "Export accounts" shows them as such codes in turn.
  *
  * Locked (store.lockEnabled), it asks for a fingerprint or the screen lock
  * passcode when it starts, and again after relockAfterMs in the
@@ -59,8 +62,14 @@ AppWindow {
     property alias appMenu: appMenu
     // Says what went wrong, under the header, until dismissed.
     property string notice: ""
-    // An otpauth:// link that came before the accounts were read.
+    // An otpauth:// or otpauth-migration:// link that came before the
+    // accounts were read.
     property string pendingLink: ""
+    // The codes of an export already imported, by its batch id: { id:
+    // [index, ...] }. Google Authenticator puts at most 10 accounts in a
+    // code, so an export of more comes as several, one link each; this is
+    // how the import says which are still to come. Not kept on disk.
+    property var importedCodes: ({})
 
     // In front, not in the background; the tests set it themselves.
     property bool inFront: Qt.application.state === Qt.ApplicationActive
@@ -206,15 +215,48 @@ AppWindow {
         clipboardHelper.text = "";
     }
 
+    // What the clipboard holds as text, through the same text field.
+    function clipboardText() {
+        clipboardHelper.text = "";
+        clipboardHelper.paste();
+        var text = clipboardHelper.text;
+        clipboardHelper.text = "";
+        return text;
+    }
+
+    // An export link (or an otpauth:// one) copied elsewhere - the
+    // Camera's Copy, say - opened as if it had come as a launch.
+    function importFromClipboard() {
+        var text = clipboardText().trim();
+        if (Migration.isMigration(text) || OtpAuthUri.isOtpAuth(text)) {
+            openLink(text);
+            return;
+        }
+        notice = "The clipboard holds no export to import. Scan the export's QR code with the Camera, "
+                + "tap Copy, then try again.";
+    }
+
+    // One code of an export is in (or held nothing new).
+    function codeImported(batchId, batchIndex) {
+        var all = Object.assign({}, importedCodes);
+        var done = (all[batchId] || []).slice(0);
+        if (done.indexOf(batchIndex) < 0)
+            done.push(batchIndex);
+        done.sort(function(a, b) { return a - b; });
+        all[batchId] = done;
+        importedCodes = all;
+    }
+
     // A short "Copied" and the like, that goes by itself.
     function showToast(text) {
         toast.show(text);
     }
 
     /*
-     * {"target": "otpauth://..."}: the application manager opens such
-     * links here (appinfo.json's mimeTypes), from the Camera's QR reader or
-     * anywhere else. The account is shown to be added, not added unasked.
+     * {"target": "otpauth://..."} or {"target": "otpauth-migration://..."}:
+     * the application manager opens such links here (appinfo.json's
+     * mimeTypes), from the Camera's QR reader or anywhere else. The
+     * accounts are shown to be added, not added unasked.
      */
     LaunchParams {
         window: appWindow
@@ -229,12 +271,17 @@ AppWindow {
     }
 
     function openLink(link) {
-        if (!OtpAuthUri.isOtpAuth(link)) {
-            notice = "Authenticator only opens otpauth:// links.";
+        var migration = Migration.isMigration(link);
+        if (!OtpAuthUri.isOtpAuth(link) && !migration) {
+            notice = "Authenticator only opens otpauth:// and otpauth-migration:// links.";
             return;
         }
         if (accountStore.status === "loading" || locked) {
             pendingLink = link;
+            return;
+        }
+        if (migration) {
+            openImport(link);
             return;
         }
         var parsed = OtpAuthUri.parse(link);
@@ -243,6 +290,25 @@ AppWindow {
             return;
         }
         openEditor({ "prefill": parsed.account, "fromLink": true });
+    }
+
+    // Another authenticator's export: its accounts, to be added together.
+    function openImport(link) {
+        var parsed = Migration.parse(link);
+        if (parsed.error) {
+            notice = parsed.error;
+            return;
+        }
+        pageStack.pop(null);
+        pageStack.push(Qt.resolvedUrl("ImportPage.qml"), { "entries": parsed.entries,
+                                                           "batchIndex": parsed.batchIndex,
+                                                           "batchSize": parsed.batchSize,
+                                                           "batchId": parsed.batchId });
+    }
+
+    function openExport() {
+        pageStack.pop(null);
+        pageStack.push(Qt.resolvedUrl("ExportPage.qml"));
     }
 
     function openEditor(properties) {
@@ -256,8 +322,10 @@ AppWindow {
         clientName: appWindow.appId
     }
 
+    // "scan": the Camera hands the otpauth:// or export code it then sees
+    // straight back here, without its banner's Open or Import.
     function scanWithCamera() {
-        launcher.launch("org.webosports.app.camera", null, undefined, function(error) {
+        launcher.launch("org.webosports.app.camera", { scan: true }, undefined, function(error) {
             appWindow.notice = "Could not open the Camera: " + error;
         });
     }
@@ -302,6 +370,20 @@ AppWindow {
             height: visible ? implicitHeight : 0
             enabled: accountStore.status === "ready"
             onTriggered: appWindow.toggleFace()
+        }
+        // The accounts as QR codes, for another phone.
+        MenuItem {
+            objectName: "exportMenuItem"
+            text: "Export accounts"
+            enabled: accountStore.status === "ready" && accountStore.accounts.length > 0
+            onTriggered: appWindow.openExport()
+        }
+        // An export link copied from the Camera.
+        MenuItem {
+            objectName: "importClipboardMenuItem"
+            text: "Import from clipboard"
+            enabled: accountStore.status === "ready"
+            onTriggered: appWindow.importFromClipboard()
         }
     }
 

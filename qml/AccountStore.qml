@@ -399,6 +399,82 @@ QtObject {
     }
 
     /*
+     * Adds several accounts at once, from another authenticator's export:
+     * every secret first, then one index naming them all, so they come in
+     * together or not at all. If a secret or the index cannot be stored,
+     * the secrets already stored are removed again. callback(error, ids).
+     */
+    function addAll(list, callback) {
+        if (!_ready(callback))
+            return;
+        _enqueue(function(next) {
+            var ids = list.map(function() { return Accounts.newId(); });
+            var secrets = list.map(function(fields) { return Base32.normalize(fields.secret); });
+            var stored = [];
+
+            function undo() {
+                stored.forEach(function(id) {
+                    _call("remove", { "keyname": Accounts.secretKeyName(id) }, function() {});
+                });
+            }
+
+            function storeFrom(i) {
+                if (i === list.length) {
+                    writeIndex();
+                    return;
+                }
+                _call("store", {
+                    "keyname": Accounts.secretKeyName(ids[i]),
+                    "keydata": secrets[i],
+                    "type": "ASCIIBLOB",
+                    "nohide": true,
+                    "noexport": true
+                }, function(error) {
+                    if (error !== "") {
+                        undo();
+                        _report("The accounts could not be saved: " + error, callback);
+                        next();
+                        return;
+                    }
+                    stored.push(ids[i]);
+                    storeFrom(i + 1);
+                });
+            }
+
+            function writeIndex() {
+                var added = list.map(function(fields, i) { return Accounts.metaFrom(fields, ids[i]); });
+                _writeIndex(accounts.concat(added), function(indexError) {
+                    if (indexError !== "") {
+                        // Not listed, so not kept.
+                        undo();
+                        _report("The accounts could not be saved: " + indexError, callback);
+                    } else {
+                        var all = Object.assign({}, _secrets);
+                        var keys = Object.assign({}, _keys);
+                        ids.forEach(function(id, i) {
+                            all[id] = secrets[i];
+                            keys[id] = Base32.decode(secrets[i]);
+                        });
+                        _secrets = all;
+                        _keys = keys;
+                        if (callback)
+                            callback("", ids);
+                    }
+                    next();
+                });
+            }
+
+            if (list.length === 0) {
+                if (callback)
+                    callback("", []);
+                next();
+                return;
+            }
+            storeFrom(0);
+        });
+    }
+
+    /*
      * Changes an account. A new secret goes under a new id, the index is
      * written, and only then is the old secret removed.
      */

@@ -1,7 +1,8 @@
 #!/bin/bash
 # Tries the installed app on a device:
 #
-# 1. The application manager sends otpauth:// links to the app.
+# 1. The application manager sends otpauth:// and otpauth-migration://
+#    links to the app.
 # 2. Test accounts (the RFC 6238 SHA-1, SHA-256 and SHA-512 seeds, and an
 #    RFC 4226 counter account) are put into the key manager as the app
 #    keeps them; the app is started, and the codes on the screen, read back
@@ -72,6 +73,11 @@ handler=$($ADB shell "luna-send -n 1 -w 5000 luna://com.palm.applicationManager/
 case "$handler" in
     *"\"appId\": \"$ID\""*|*"\"appId\":\"$ID\""*) ok "otpauth:// links go to the app" ;;
     *) fail "otpauth:// handler: $handler" ;;
+esac
+handler=$($ADB shell "luna-send -n 1 -w 5000 luna://com.palm.applicationManager/getHandlerForUrl '{\"url\":\"otpauth-migration://offline?data=AA\"}' 2>&1" | tr -d '\r')
+case "$handler" in
+    *"\"appId\": \"$ID\""*|*"\"appId\":\"$ID\""*) ok "otpauth-migration:// links go to the app" ;;
+    *) fail "otpauth-migration:// handler: $handler" ;;
 esac
 
 # 2. Codes on the screen.
