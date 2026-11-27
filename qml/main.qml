@@ -322,8 +322,10 @@ AppWindow {
         clientName: appWindow.appId
     }
 
+    // "scan": the Camera hands the otpauth:// or export code it then sees
+    // straight back here, without its banner's Open or Import.
     function scanWithCamera() {
-        launcher.launch("org.webosports.app.camera", null, undefined, function(error) {
+        launcher.launch("org.webosports.app.camera", { scan: true }, undefined, function(error) {
             appWindow.notice = "Could not open the Camera: " + error;
         });
     }

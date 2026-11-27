@@ -3,8 +3,10 @@
 One-time codes for two-step verification on LuneOS: time-based (TOTP,
 RFC 6238) and counter-based (HOTP, RFC 4226).
 
-- Accounts from a site's QR code: the Camera reads it and opens the
-  otpauth:// link here. Any app that opens an otpauth:// link through the
+- Accounts from a site's QR code: "Scan a QR code" opens the Camera,
+  which hands the otpauth:// link it reads straight back here; opened on
+  its own, the Camera shows the code in its banner and Open sends it
+  here. Any app that opens an otpauth:// link through the
   application manager does the same. The app shows what the link holds;
   nothing is added until you tap Save.
 - Accounts typed in: the site's key (Base32, spaces and lower case are
@@ -18,9 +20,11 @@ RFC 6238) and counter-based (HOTP, RFC 4226).
   one). Add stores the new ones together. Google Authenticator puts at
   most 10 accounts in a code, so an export of more is several codes,
   each imported on its own; the app says which codes of the export are
-  in and which are still to scan (until it is closed). "Import from
-  clipboard" in the app menu opens an export link copied elsewhere - the
-  Camera's Copy - and pasting one into the key field works too.
+  in and which are still to scan (until it is closed). The Camera reads
+  these codes as it does a site's: from "Scan a QR code" straight here,
+  or from its banner ("3 accounts, code 2 of 3") with Import. "Import
+  from clipboard" in the app menu opens an export link copied elsewhere,
+  and pasting one into the key field works too.
 - "Export accounts" in the app menu shows the accounts as QR codes of
   that same kind, a few accounts in each, for Google Authenticator's
   "Import accounts" or another app that reads them. You choose which
@@ -165,10 +169,10 @@ registers the app for otpauth:// links and for other authenticators'
 exports; it is opened with `{"target": "otpauth://..."}` or
 `{"target": "otpauth-migration://..."}`.
 
-The Camera's code banner offers Open only for codes starting with
-`otpauth:` so far, so a Google Authenticator export it reads is not yet
-opened here from there; Copy, then "Import from clipboard" in the app
-menu, works meanwhile.
+"Scan a QR code" launches the Camera with `{"scan": true}`. A Camera
+from before export codes were known to it offers Open only for
+`otpauth:` codes and shows the banner even when asked to scan; Copy,
+then "Import from clipboard", works there.
 
 ## Install for development
 
