@@ -65,6 +65,11 @@ AppWindow {
     // An otpauth:// or otpauth-migration:// link that came before the
     // accounts were read.
     property string pendingLink: ""
+    // The codes of an export already imported, by its batch id: { id:
+    // [index, ...] }. Google Authenticator puts at most 10 accounts in a
+    // code, so an export of more comes as several, one link each; this is
+    // how the import says which are still to come. Not kept on disk.
+    property var importedCodes: ({})
 
     // In front, not in the background; the tests set it themselves.
     property bool inFront: Qt.application.state === Qt.ApplicationActive
@@ -210,6 +215,38 @@ AppWindow {
         clipboardHelper.text = "";
     }
 
+    // What the clipboard holds as text, through the same text field.
+    function clipboardText() {
+        clipboardHelper.text = "";
+        clipboardHelper.paste();
+        var text = clipboardHelper.text;
+        clipboardHelper.text = "";
+        return text;
+    }
+
+    // An export link (or an otpauth:// one) copied elsewhere - the
+    // Camera's Copy, say - opened as if it had come as a launch.
+    function importFromClipboard() {
+        var text = clipboardText().trim();
+        if (Migration.isMigration(text) || OtpAuthUri.isOtpAuth(text)) {
+            openLink(text);
+            return;
+        }
+        notice = "The clipboard holds no export to import. Scan the export's QR code with the Camera, "
+                + "tap Copy, then try again.";
+    }
+
+    // One code of an export is in (or held nothing new).
+    function codeImported(batchId, batchIndex) {
+        var all = Object.assign({}, importedCodes);
+        var done = (all[batchId] || []).slice(0);
+        if (done.indexOf(batchIndex) < 0)
+            done.push(batchIndex);
+        done.sort(function(a, b) { return a - b; });
+        all[batchId] = done;
+        importedCodes = all;
+    }
+
     // A short "Copied" and the like, that goes by itself.
     function showToast(text) {
         toast.show(text);
@@ -265,7 +302,8 @@ AppWindow {
         pageStack.pop(null);
         pageStack.push(Qt.resolvedUrl("ImportPage.qml"), { "entries": parsed.entries,
                                                            "batchIndex": parsed.batchIndex,
-                                                           "batchSize": parsed.batchSize });
+                                                           "batchSize": parsed.batchSize,
+                                                           "batchId": parsed.batchId });
     }
 
     function openExport() {
@@ -337,6 +375,13 @@ AppWindow {
             text: "Export accounts"
             enabled: accountStore.status === "ready" && accountStore.accounts.length > 0
             onTriggered: appWindow.openExport()
+        }
+        // An export link copied from the Camera.
+        MenuItem {
+            objectName: "importClipboardMenuItem"
+            text: "Import from clipboard"
+            enabled: accountStore.status === "ready"
+            onTriggered: appWindow.importFromClipboard()
         }
     }
 

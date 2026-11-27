@@ -15,9 +15,12 @@ RFC 6238) and counter-based (HOTP, RFC 4226).
   accounts" export, whose QR codes hold several accounts each
   (`otpauth-migration://`). Each code is shown first: which accounts are
   new, which are here already, and which cannot be used and why (MD5, for
-  one). Add stores the new ones together. An export of several codes is
-  scanned one code at a time. Pasting such a link into the key field
-  works too.
+  one). Add stores the new ones together. Google Authenticator puts at
+  most 10 accounts in a code, so an export of more is several codes,
+  each imported on its own; the app says which codes of the export are
+  in and which are still to scan (until it is closed). "Import from
+  clipboard" in the app menu opens an export link copied elsewhere - the
+  Camera's Copy - and pasting one into the key field works too.
 - "Export accounts" in the app menu shows the accounts as QR codes of
   that same kind, a few accounts in each, for Google Authenticator's
   "Import accounts" or another app that reads them. You choose which
@@ -31,7 +34,9 @@ RFC 6238) and counter-based (HOTP, RFC 4226).
   red for the last five seconds.
 - A counter-based code is made only when asked ("Show code" / "Next
   code"), and the counter is saved before the code is shown.
-- Touch and hold an account to edit or delete it. "Change the order" in
+- Touch and hold an account to edit or delete it, or swipe it sideways:
+  the row then asks Cancel / Delete in its place, as Settings' lists and
+  the legacy webOS ones do. "Change the order" in
   the app menu puts Up and Down on the rows.
 - The back gesture leaves the editor, closes a dialog and ends reordering.
 - "Lock with fingerprint or passcode" in the app menu: from then on the
@@ -162,8 +167,8 @@ exports; it is opened with `{"target": "otpauth://..."}` or
 
 The Camera's code banner offers Open only for codes starting with
 `otpauth:` so far, so a Google Authenticator export it reads is not yet
-opened here from there; Copy, then pasting into the key field of "Add
-account", works meanwhile.
+opened here from there; Copy, then "Import from clipboard" in the app
+menu, works meanwhile.
 
 ## Install for development
 
@@ -197,13 +202,17 @@ It builds an "Architecture: all" ipk and installs it through
   codes shown end to end and following the clock; copying; adding typed
   and pasted keys; refused keys; duplicates; otpauth:// launches, also
   before the accounts are read; an export imported (new accounts, ones
-  already there, the same one twice, MD5, several codes, nothing new, a
-  failed write that leaves no secret behind, while locked, pasted); the
+  already there, the same one twice, MD5, nothing new, a failed write
+  that leaves no secret behind, while locked, pasted, from the
+  clipboard; an export of three codes imported out of order, with which
+  are in and which to scan next, counted per export); the
   export (which accounts, those that cannot go and why, several codes,
   Previous and Next, the back gesture, the codes taken away in the
   background) and an export imported into a fresh app with the same
   codes; editing with and without a new key;
-  deleting; reordering; counter-based codes; a key manager that refuses
+  deleting, from the menu and by swiping (a long swipe asks first, Cancel
+  keeps it, a short one springs back without copying, none while
+  reordering); reordering; counter-based codes; a key manager that refuses
   or never answers; the two index keys and a damaged one; a failed write;
   the back gesture; the app menu; the layout in a 320x480 window. The
   lock, with `FakeAuth.qml` in place of luna-authmanager and the
@@ -240,7 +249,7 @@ It builds an "Architecture: all" ipk and installs it through
   libzbar and Python's PIL, and says SKIP when either is missing. The
   pictures need a luneos-components built with libqrencode; without it
   the code is not drawn, and tst_screens.qml fails saying so.
-`tools/mutation-check.sh` breaks the code in 72 ways, one at a time (the
+`tools/mutation-check.sh` breaks the code in 77 ways, one at a time (the
 hashes, the truncation, Base32, the index, the order of writes, the back
 gesture, the lock, the export format, import and export and more), and
 checks that the tests fail for each.

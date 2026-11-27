@@ -313,6 +313,23 @@ TestCase {
         shot("toast");
     }
 
+    // Swiped away: Delete and Cancel inside the row.
+    function test_swipe_delete() {
+        makeKeymanager();
+        seedAccounts();
+        createApp();
+        tryVerify(function() { return row(1) !== null; });
+        var r = row(1);
+        mouseDrag(r, r.width * 0.2, r.height / 2, r.width * 0.6, 0, Qt.LeftButton, Qt.NoModifier, 5);
+        var del = findChild(r, "swipeDeleteButton");
+        tryVerify(function() { return del.visible; }, 2000, "no Delete after a long swipe");
+        onScreen(del, "Delete");
+        onScreen(findChild(r, "swipeCancelButton"), "Cancel");
+        var p = del.mapToItem(r, 0, 0);
+        verify(p.y >= -0.5 && p.y + del.height <= r.height + 0.5, "Delete is taller than the row");
+        shot("swipe-delete");
+    }
+
     function test_account_menu_and_delete() {
         makeKeymanager();
         seedAccounts();

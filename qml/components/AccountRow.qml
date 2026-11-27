@@ -31,8 +31,14 @@ import "../js/Accounts.js" as Accounts
 /*
  * One account: the site and the name, the code, and how long it has left
  * (time-based) or a button for the next one (counter-based). Tap to copy
- * the code; touch and hold for Edit and Delete. While reordering, arrows
- * take the place of the code's timer.
+ * the code; touch and hold for Edit and Delete. Swiped sideways more
+ * than 4 grid units, the row asks Cancel / Delete in its place, as
+ * Settings' lists do (the dictionary, fingerprints, applications): the
+ * legacy webOS delete gesture, a row chosen twice before anything goes.
+ * Not the style's SwipeDelegate, which Settings left too: its one red
+ * panel has no Cancel, and its swipe does not arrive with a mouse. While
+ * reordering, arrows take the place of the code's timer, and the row does
+ * not swipe.
  */
 Item {
     id: row
@@ -51,6 +57,17 @@ Item {
     signal menuRequested()
     signal nextCodeRequested()
     signal moveRequested(int to)
+    // Swiped away and confirmed in the row.
+    signal deleteRequested()
+
+    // Swiped far enough: Delete / Cancel in the row's place.
+    property bool confirming: false
+    onReorderingChanged: cancelSwipe()
+
+    function cancelSwipe() {
+        confirming = false;
+        slide.x = 0;
+    }
 
     readonly property bool timeBased: account.type !== "hotp"
     readonly property real step: timeBased ? Otp.timeStep(now, account.period) : -1
@@ -70,101 +87,171 @@ Item {
     width: ListView.view ? ListView.view.width : implicitWidth
     height: Math.max(compact ? Units.gu(7) : Units.gu(9), content.implicitHeight + (compact ? Units.gu(1) : Units.gu(2)))
 
+    // Under the row while it is swiped: the question.
     Rectangle {
+        objectName: "swipeBackdrop"
         anchors.fill: parent
-        color: mouse.pressed && !row.reordering ? "#20000000" : "transparent"
+        visible: slide.x !== 0 || row.confirming
+        color: "#5a5a5a"
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Units.gu(1.5)
+            anchors.rightMargin: Units.gu(1.5)
+            spacing: Units.gu(1.5)
+            visible: row.confirming
+
+            Item { Layout.fillWidth: true }
+            Button {
+                objectName: "swipeCancelButton"
+                text: "Cancel"
+                onClicked: row.cancelSwipe()
+            }
+            Button {
+                objectName: "swipeDeleteButton"
+                text: "Delete"
+                LuneOSButton.mainColor: LuneOSButton.negativeColor
+                onClicked: {
+                    row.confirming = false;
+                    row.deleteRequested();
+                }
+            }
+            Item { Layout.fillWidth: true }
+        }
     }
 
-    MouseArea {
-        id: mouse
-        objectName: "rowMouse"
-        anchors.fill: parent
-        enabled: !row.reordering
-        onClicked: {
-            if (row.code !== "")
-                row.copyRequested(row.code);
-            else if (!row.timeBased && row.key)
-                row.nextCodeRequested();
+    Item {
+        id: slide
+        objectName: "rowSlide"
+        width: parent.width
+        height: parent.height
+        visible: !row.confirming
+
+        Behavior on x {
+            enabled: !swipe.active
+            NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
         }
-        onPressAndHold: row.menuRequested()
-    }
 
-    RowLayout {
-        id: content
-        anchors.fill: parent
-        anchors.leftMargin: Units.gu(2)
-        anchors.rightMargin: Units.gu(2)
-        spacing: Units.gu(1.5)
+        // The page's colour under the row while it moves, so the question
+        // shows only beside it.
+        Rectangle {
+            anchors.fill: parent
+            visible: slide.x !== 0
+            color: Colors.pageBackground
+        }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 0
+        Rectangle {
+            anchors.fill: parent
+            color: mouse.pressed && !row.reordering ? "#20000000" : "transparent"
+        }
 
-            Label {
-                objectName: "titleLabel"
-                Layout.fillWidth: true
-                text: Accounts.title(row.account)
-                elide: Text.ElideRight
-                font.weight: Font.Bold
-                font.pixelSize: FontUtils.sizeToPixels("medium")
-                color: Colors.text
+        MouseArea {
+            id: mouse
+            objectName: "rowMouse"
+            anchors.fill: parent
+            enabled: !row.reordering
+            onClicked: {
+                if (row.code !== "")
+                    row.copyRequested(row.code);
+                else if (!row.timeBased && row.key)
+                    row.nextCodeRequested();
             }
-            Label {
-                objectName: "subtitleLabel"
+            onPressAndHold: row.menuRequested()
+        }
+
+        RowLayout {
+            id: content
+            anchors.fill: parent
+            anchors.leftMargin: Units.gu(2)
+            anchors.rightMargin: Units.gu(2)
+            spacing: Units.gu(1.5)
+
+            ColumnLayout {
                 Layout.fillWidth: true
-                visible: text !== ""
-                text: Accounts.subtitle(row.account)
-                elide: Text.ElideRight
-                font.pixelSize: FontUtils.sizeToPixels("small")
-                color: Colors.secondaryText
+                spacing: 0
+
+                Label {
+                    objectName: "titleLabel"
+                    Layout.fillWidth: true
+                    text: Accounts.title(row.account)
+                    elide: Text.ElideRight
+                    font.weight: Font.Bold
+                    font.pixelSize: FontUtils.sizeToPixels("medium")
+                    color: Colors.text
+                }
+                Label {
+                    objectName: "subtitleLabel"
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: Accounts.subtitle(row.account)
+                    elide: Text.ElideRight
+                    font.pixelSize: FontUtils.sizeToPixels("small")
+                    color: Colors.secondaryText
+                }
+                Label {
+                    objectName: "codeLabel"
+                    Layout.fillWidth: true
+                    text: !row.key ? "No key stored; add the account again."
+                          : row.code !== "" ? Otp.format(row.code)
+                          : "Tap for a code"
+                    elide: Text.ElideRight
+                    color: !row.key ? Colors.error
+                           : row.code === "" ? Colors.secondaryText
+                           : (row.timeBased && ring.ending ? "#be0003" : "#1f5f8b")
+                    font.pixelSize: row.code !== "" ? FontUtils.sizeToPixels(row.compact ? "large" : "x-large")
+                                                    : FontUtils.sizeToPixels("medium")
+                    font.weight: row.code !== "" ? Font.Bold : Font.Normal
+                    font.letterSpacing: row.code !== "" ? Units.gu(0.2) : 0
+                }
             }
-            Label {
-                objectName: "codeLabel"
-                Layout.fillWidth: true
-                text: !row.key ? "No key stored; add the account again."
-                      : row.code !== "" ? Otp.format(row.code)
-                      : "Tap for a code"
-                elide: Text.ElideRight
-                color: !row.key ? Colors.error
-                       : row.code === "" ? Colors.secondaryText
-                       : (row.timeBased && ring.ending ? "#be0003" : "#1f5f8b")
-                font.pixelSize: row.code !== "" ? FontUtils.sizeToPixels(row.compact ? "large" : "x-large")
-                                                : FontUtils.sizeToPixels("medium")
-                font.weight: row.code !== "" ? Font.Bold : Font.Normal
-                font.letterSpacing: row.code !== "" ? Units.gu(0.2) : 0
+
+            CountdownRing {
+                id: ring
+                objectName: "countdownRing"
+                visible: row.timeBased && !row.reordering && !!row.key
+                period: row.account.period || 30
+                secondsLeft: Otp.secondsLeft(row.now, period)
+            }
+
+            Button {
+                objectName: "nextCodeButton"
+                visible: !row.timeBased && !row.reordering && !!row.key
+                text: row.code === "" ? "Show code" : "Next code"
+                onClicked: row.nextCodeRequested()
+            }
+
+            Button {
+                objectName: "moveUpButton"
+                visible: row.reordering
+                enabled: row.index > 0
+                text: "Up"
+                implicitWidth: Units.gu(8)
+                onClicked: row.moveRequested(row.index - 1)
+            }
+            Button {
+                objectName: "moveDownButton"
+                visible: row.reordering
+                enabled: row.index < row.count - 1
+                text: "Down"
+                implicitWidth: Units.gu(8)
+                onClicked: row.moveRequested(row.index + 1)
             }
         }
 
-        CountdownRing {
-            id: ring
-            objectName: "countdownRing"
-            visible: row.timeBased && !row.reordering && !!row.key
-            period: row.account.period || 30
-            secondsLeft: Otp.secondsLeft(row.now, period)
-        }
-
-        Button {
-            objectName: "nextCodeButton"
-            visible: !row.timeBased && !row.reordering && !!row.key
-            text: row.code === "" ? "Show code" : "Next code"
-            onClicked: row.nextCodeRequested()
-        }
-
-        Button {
-            objectName: "moveUpButton"
-            visible: row.reordering
-            enabled: row.index > 0
-            text: "Up"
-            implicitWidth: Units.gu(8)
-            onClicked: row.moveRequested(row.index - 1)
-        }
-        Button {
-            objectName: "moveDownButton"
-            visible: row.reordering
-            enabled: row.index < row.count - 1
-            text: "Down"
-            implicitWidth: Units.gu(8)
-            onClicked: row.moveRequested(row.index + 1)
+        DragHandler {
+            id: swipe
+            target: slide
+            enabled: !row.reordering && !row.confirming
+            yAxis.enabled: false
+            xAxis.minimum: -row.width
+            xAxis.maximum: row.width
+            onActiveChanged: {
+                if (active)
+                    return;
+                if (Math.abs(slide.x) > Units.gu(4))
+                    row.confirming = true;
+                slide.x = 0;
+            }
         }
     }
 

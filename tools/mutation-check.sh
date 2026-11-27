@@ -92,6 +92,11 @@ mutations=(
 "accounts left out exported anyway ¦ qml/ExportPage.qml ¦         codes = Migration.compose(chosen, ¦         codes = Migration.compose(exportable,"
 "codes left on the screen in the background ¦ qml/ExportPage.qml ¦             if (!appWindow.inFront && page.step === \"codes\") ¦             if (false)"
 "back gesture leaves the codes for the list ¦ qml/ExportPage.qml ¦         if (event.key === Qt.Key_Escape && _escapeTaken) { ¦         if (false) {"
+"codes of an export not counted ¦ qml/main.qml ¦         if (done.indexOf(batchIndex) < 0)\n            done.push(batchIndex); ¦         if (false)\n            done.push(batchIndex);"
+"clipboard not read ¦ qml/main.qml ¦         if (Migration.isMigration(text) || OtpAuthUri.isOtpAuth(text)) { ¦         if (false) {"
+"a swipe deletes without asking ¦ qml/components/AccountRow.qml ¦                 if (Math.abs(slide.x) > Units.gu(4))\n                    row.confirming = true; ¦                 if (Math.abs(slide.x) > Units.gu(4))\n                    row.deleteRequested();"
+"a short swipe asks too ¦ qml/components/AccountRow.qml ¦                 if (Math.abs(slide.x) > Units.gu(4)) ¦                 if (Math.abs(slide.x) > 0)"
+"swipes while reordering ¦ qml/components/AccountRow.qml ¦             enabled: !row.reordering && !row.confirming ¦             enabled: !row.confirming"
 "pasted export link left in the key field ¦ qml/EditAccountPage.qml ¦                         if (!page.editing && Migration.isMigration(text)) { ¦                         if (false) {"
 )
 

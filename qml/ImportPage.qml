@@ -43,9 +43,23 @@ AppPage {
     readonly property var store: appWindow.store
     // Migration.parse()'s entries: { account } or { problem, title }.
     property var entries: []
-    // Which code of the export this is, from 0, and how many there are.
+    // Which code of the export this is, from 0, how many there are, and
+    // the export's id, the same in each of its codes.
     property int batchIndex: 0
     property int batchSize: 1
+    property real batchId: 0
+    // The export's other codes, from 0: those already in, those to come.
+    readonly property var doneCodes: (appWindow.importedCodes[batchId] || []).filter(function(i) {
+        return i !== batchIndex && i < batchSize;
+    })
+    readonly property var codesToCome: {
+        var out = [];
+        for (var i = 0; i < batchSize; i++) {
+            if (i !== batchIndex && doneCodes.indexOf(i) < 0)
+                out.push(i);
+        }
+        return out;
+    }
     property bool saving: false
 
     // The entries as shown: { title, subtitle, note, problem, account }
@@ -92,6 +106,27 @@ AppPage {
 
     StackView.onActivated: forceActiveFocus()
 
+    // A code with nothing new in it counts as in.
+    Component.onCompleted: {
+        if (toAdd.length === 0 && batchSize > 1)
+            appWindow.codeImported(batchId, batchIndex);
+    }
+
+    // [0, 2] as "1 and 3".
+    function numbers(list) {
+        var n = list.map(function(i) { return String(i + 1); });
+        return n.length <= 1 ? n.join("") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
+    }
+
+    // After this code: what is left of the export, for the toast.
+    function nextStep() {
+        if (batchSize <= 1)
+            return "";
+        if (codesToCome.length === 0)
+            return "all " + batchSize + " codes of the export are in";
+        return "now scan code " + numbers([codesToCome[0]]) + " of " + batchSize;
+    }
+
     function add() {
         if (toAdd.length === 0 || saving)
             return;
@@ -102,7 +137,11 @@ AppPage {
             saving = false;
             if (error !== "")
                 return;
-            appWindow.showToast(count === 1 ? "Added " + first : "Added " + count + " accounts");
+            var added = count === 1 ? "Added " + first : "Added " + count + " accounts";
+            var next = nextStep();
+            if (batchSize > 1)
+                appWindow.codeImported(batchId, batchIndex);
+            appWindow.showToast(next !== "" ? added + "; " + next : added);
             appWindow.pageStack.pop();
         });
     }
@@ -111,9 +150,16 @@ AppPage {
         var text = toAdd.length > 0
                 ? "From another authenticator's export: check that these are your accounts, then Add."
                 : "From another authenticator's export: there is nothing new in it to add.";
-        if (batchSize > 1)
-            text += " This is code " + (batchIndex + 1) + " of " + batchSize
-                    + "; scan the others after this one.";
+        if (batchSize > 1) {
+            text += " The export is " + batchSize + " QR codes, at most 10 accounts in each; this is code "
+                    + (batchIndex + 1) + ".";
+            if (doneCodes.length > 0)
+                text += (doneCodes.length === 1 ? " Code " : " Codes ") + numbers(doneCodes)
+                        + (doneCodes.length === 1 ? " is" : " are") + " in already.";
+            if (codesToCome.length > 0)
+                text += " Scan " + (codesToCome.length === 1 ? "code " : "codes ") + numbers(codesToCome)
+                        + " after this one.";
+        }
         return text;
     }
 
