@@ -28,12 +28,15 @@ import LuneOS.Forms 1.0
 import "js/Accounts.js" as Accounts
 import "js/Base32.js" as Base32
 import "js/OtpAuthUri.js" as OtpAuthUri
+import "js/Migration.js" as Migration
 
 /*
  * A new account, typed in or from an otpauth:// link, or one to change.
  * Most sites need only the key: time-based, SHA1, 6 digits, 30 seconds
  * are what nearly all of them use, so those sit under "More settings".
- * An otpauth:// link pasted into the key field fills in everything.
+ * An otpauth:// link pasted into the key field fills in everything; an
+ * otpauth-migration:// one (another authenticator's export) opens the
+ * import instead.
  */
 AppPage {
     id: page
@@ -210,7 +213,12 @@ AppPage {
                     acceptable: page.problems.secret === undefined || (!page.triedSave && text === "")
                     // A whole otpauth:// link pasted here fills in the rest.
                     onTextChanged: {
-                        if (OtpAuthUri.isOtpAuth(text)) {
+                        if (!page.editing && Migration.isMigration(text)) {
+                            var link = text;
+                            text = "";
+                            // Not while this field is still changing.
+                            Qt.callLater(function() { appWindow.openImport(link); });
+                        } else if (OtpAuthUri.isOtpAuth(text)) {
                             var parsed = OtpAuthUri.parse(text);
                             if (parsed.account) {
                                 page.fill(parsed.account);

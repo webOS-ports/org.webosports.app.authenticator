@@ -6,7 +6,10 @@
  * QML's: the published vectors (vectors.js), each vector also recomputed
  * with Node's crypto (OpenSSL), and random inputs compared against OpenSSL
  * - every length from 0 to 300 bytes, which crosses each padding boundary
- * of both block sizes, and random keys, counters and times.
+ * of both block sizes, and random keys, counters and times. The export
+ * format (Migration.js): the sample link of the otpauth tools that read
+ * Google Authenticator's exports, base64 and UTF-8 against Node's own,
+ * and round trips of random accounts.
  *
  *     node tests/js/run-node-tests.js
  *
@@ -50,6 +53,7 @@ const Base32 = load(path.join(root, "qml/js/Base32.js"));
 const Otp = load(path.join(root, "qml/js/Otp.js"));
 const Uri = load(path.join(root, "qml/js/OtpAuthUri.js"));
 const Accounts = load(path.join(root, "qml/js/Accounts.js"));
+const Migration = load(path.join(root, "qml/js/Migration.js"));
 const V = load(path.join(__dirname, "vectors.js"));
 
 let passed = 0, failed = 0;
@@ -234,6 +238,192 @@ check(/^[0-9a-f]{16}$/.test(Accounts.newId()), "newId");
 eq(Accounts.secretKeyName("abc"), "otp.secret.abc", "secret key name");
 eq(Accounts.isDuplicate([{ id: "1", issuer: "Ex", label: "me" }], { issuer: "ex", label: "ME" }, "JBSW", { "1": "JBSW" }), true, "duplicate");
 eq(Accounts.isDuplicate([{ id: "1", issuer: "Ex", label: "me" }], { issuer: "Ex", label: "me" }, "OTHER", { "1": "JBSW" }), false, "same name, other key");
+
+// otpauth-migration://: Google Authenticator's export.
+// The sample in the otpauth tools that read the format (dim13/otpauth):
+// "Hello!" and 0xdeadbeef as the key, "Example:alice@google.com".
+r = Migration.parse("otpauth-migration://offline?data=CjEKCkhlbGxvId6tvu8SGEV4YW1wbGU6YWxpY2VAZ29vZ2xlLmNvbRoHRXhhbXBsZTAC");
+eq(r.entries, [{ account: { type: "totp", issuer: "Example", label: "alice@google.com", secret: "JBSWY3DPEHPK3PXP",
+                            algorithm: "SHA1", digits: 6, period: 30, counter: 0 } }], "the published sample");
+eq([r.batchIndex, r.batchSize], [0, 1], "one code");
+eq(Migration.base64Encode(Migration.base64Decode("CjEKCkhlbGxvId6tvu8SGEV4YW1wbGU6YWxpY2VAZ29vZ2xlLmNvbRoHRXhhbXBsZTAC")),
+   "CjEKCkhlbGxvId6tvu8SGEV4YW1wbGU6YWxpY2VAZ29vZ2xlLmNvbRoHRXhhbXBsZTAC", "base64 round trip of the sample");
+
+for (let i = 0; i < 300; i++) {
+    const data = Array.from(crypto.randomBytes(i % 90));
+    const b64 = Buffer.from(data).toString("base64");
+    eq(Migration.base64Encode(data), b64, "base64 of " + data.length + " bytes as Node's");
+    eq(Migration.base64Decode(b64), data, "base64 back, " + data.length + " bytes");
+    eq(Migration.base64Decode(b64.replace(/=+$/, "")), data, "base64 without padding");
+    eq(Migration.base64Decode(Buffer.from(data).toString("base64url")), data, "URL-safe base64");
+}
+eq(Migration.base64Decode("abc!"), null, "not base64");
+eq(Migration.base64Decode("abcde"), null, "a dangling base64 character");
+
+const texts = ["", "plain", "Zürich", "日本語", "emoji 😀 and more 🎉", "\u00ff\u0100\u07ff\u0800\uffff", "a\u0000b"];
+texts.forEach(function (t) {
+    eq(Migration.utf8Encode(t), Array.from(Buffer.from(t, "utf8")), "UTF-8 of " + JSON.stringify(t) + " as Node's");
+    eq(Migration.utf8Decode(Array.from(Buffer.from(t, "utf8"))), t, "UTF-8 back " + JSON.stringify(t));
+});
+for (let i = 0; i < 300; i++) {
+    let t = "";
+    for (let n = 0; n < 12; n++) {
+        const cp = [0x41 + (i * 7 + n) % 50, 0xa0 + i * 13 + n, 0x900 + i * 31 + n, 0x1f300 + i + n][n % 4];
+        t += String.fromCodePoint(cp);
+    }
+    eq(Migration.utf8Decode(Migration.utf8Encode(t)), t, "UTF-8 round trip " + i);
+    eq(Migration.utf8Encode(t), Array.from(Buffer.from(t, "utf8")), "UTF-8 as Node's " + i);
+}
+eq(Migration.utf8Decode([0xc0, 0x80]), null, "overlong UTF-8");
+eq(Migration.utf8Decode([0xe0, 0x80, 0xaf]), null, "overlong UTF-8 in three bytes");
+eq(Migration.utf8Decode([0xf0, 0x80, 0x80, 0xaf]), null, "overlong UTF-8 in four bytes");
+eq(Migration.utf8Decode([0xf4, 0x90, 0x80, 0x80]), null, "past U+10FFFF");
+eq(Migration.utf8Decode([0xe2, 0x82]), null, "cut-off UTF-8");
+eq(Migration.utf8Decode([0xed, 0xa0, 0x80]), null, "a surrogate in UTF-8");
+eq(Migration.utf8Decode([0x80]), null, "a stray continuation byte");
+
+// A payload built by hand, field by field.
+function pb(fields) {
+    const out = [];
+    fields.forEach(function (f) {
+        if (Array.isArray(f[1]))
+            Migration.writeBytes(out, f[0], f[1]);
+        else if (typeof f[1] === "string")
+            Migration.writeBytes(out, f[0], bytes(f[1]));
+        else
+            Migration.writeNumber(out, f[0], f[1]);
+    });
+    return out;
+}
+function migrationLink(payload) {
+    return "otpauth-migration://offline?data=" + encodeURIComponent(Buffer.from(payload).toString("base64"));
+}
+const key20 = asciiBytes("12345678901234567890");
+r = Migration.parse(migrationLink(pb([
+    [1, pb([[1, key20], [2, "Lab:bob"], [4, 3], [5, 2], [6, 1], [7, 2 ** 40 + 5]])],
+    [1, pb([[1, key20], [2, "carol"], [3, "Mail"], [4, 2]])],
+    [1, pb([[1, key20], [2, "old"], [4, 4]])],
+    [1, pb([[1, [1, 2, 3]], [2, "short"]])],
+    [1, pb([[1, key20], [2, "seven"], [5, 3]])],
+    [1, pb([[2, "nokey"]])],
+    [1, pb([[1, key20], [2, "steam"], [6, 7]])],
+    [1, pb([[1, key20], [2, [0xff, 0xfe]]])],
+    [1, pb([[1, key20]])],
+    [2, 1], [3, 3], [4, 2], [5, 12345]])));
+eq(r.entries[0].account, { type: "hotp", issuer: "Lab", label: "bob", secret: Base32.encode(key20), algorithm: "SHA512",
+                           digits: 8, period: 30, counter: 2 ** 40 + 5 }, "HOTP, SHA-512, 8 digits, a 41-bit counter");
+eq(r.entries[1].account, { type: "totp", issuer: "Mail", label: "carol", secret: Base32.encode(key20), algorithm: "SHA256",
+                           digits: 6, period: 30, counter: 0 }, "type left out is time-based");
+check(/MD5/.test(r.entries[2].problem) && r.entries[2].title === "old", "MD5 refused, by name");
+check(/too short/.test(r.entries[3].problem), "a 3-byte key refused");
+check(/digits/.test(r.entries[4].problem), "an unknown digit count refused");
+check(/no key/.test(r.entries[5].problem), "no key");
+check(/kind of code/.test(r.entries[6].problem), "an unknown type refused");
+check(/garbled/.test(r.entries[7].problem), "a name that is not UTF-8");
+check(/no name/.test(r.entries[8].problem), "no name");
+eq([r.batchIndex, r.batchSize, r.batchId], [2, 3, 12345], "the batch fields");
+
+r = Migration.parse(migrationLink(pb([[1, pb([[1, key20], [2, "Other:me"], [3, "Mine"]])]])));
+eq([r.entries[0].account.issuer, r.entries[0].account.label], ["Mine", "Other:me"], "another site's prefix stays in the name");
+r = Migration.parse(migrationLink(pb([[1, pb([[1, key20], [2, "mine: me "], [3, "Mine"]])]])));
+eq([r.entries[0].account.issuer, r.entries[0].account.label], ["Mine", "me"], "the issuer's own prefix goes");
+// Unknown fields, of every wire type, are passed over.
+r = Migration.parse(migrationLink(pb([[1, pb([[1, key20], [2, "x"], [9, 4], [10, "more"]])], [7, 99]]).concat([0x5d, 1, 2, 3, 4, 0x61, 1, 2, 3, 4, 5, 6, 7, 8])));
+eq(r.entries.length, 1, "unknown fields skipped");
+eq(r.entries[0].account.label, "x", "unknown fields skipped, account kept");
+// A "+" that became a space, and the base64 left unescaped.
+let plain = "";
+for (let n = 0; !/\+/.test(plain) && n < 1000; n++)
+    plain = Buffer.from(pb([[1, pb([[1, Array.from(crypto.randomBytes(20))], [2, "x"]])]])).toString("base64");
+check(/\+/.test(plain), "the test data has a + in it");
+eq(Migration.parse("otpauth-migration://offline?data=" + plain.replace(/\+/g, " ")).entries[0].account.label, "x", "a + as a space");
+eq(Migration.parse("OTPAUTH-MIGRATION://offline?data=" + plain).entries[0].account.label, "x", "unescaped, upper-case scheme");
+// Batch fields out of range do not count.
+r = Migration.parse(migrationLink(pb([[1, pb([[1, key20], [2, "x"]])], [3, 2], [4, 5]])));
+eq([r.batchIndex, r.batchSize], [0, 2], "an index past the size");
+
+check(/no accounts/.test(Migration.parse("otpauth-migration://offline?data=").error), "no data");
+check(/no accounts/.test(Migration.parse("otpauth-migration://offline?x=1").error), "no data parameter");
+check(/no accounts/.test(Migration.parse(migrationLink(pb([[2, 1]]))).error), "no accounts");
+check(/garbled/.test(Migration.parse("otpauth-migration://offline?data=%E0%A4%A").error), "bad escape");
+check(/garbled/.test(Migration.parse("otpauth-migration://offline?data=!!!!").error), "not base64");
+check(/garbled/.test(Migration.parse(migrationLink([0x0a, 0x20, 1, 2])).error), "a field longer than the data");
+check(/garbled/.test(Migration.parse(migrationLink([0x0b, 0])).error), "wire type 3");
+check(/garbled/.test(Migration.parse(migrationLink([0x08, 0xff])).error), "a cut-off varint");
+check(/garbled/.test(Migration.parse(migrationLink([0x08].concat(new Array(11).fill(0xff)))).error), "an endless varint");
+check(/not an otpauth-migration/.test(Migration.parse("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP").error), "otpauth:// is not one");
+eq(Migration.isMigration(" otpauth-migration://offline?data=x"), true, "isMigration");
+eq(Migration.isMigration("otpauth://totp/x"), false, "isMigration otpauth");
+// Every cut of a good payload is refused or read, never thrown on.
+const whole = pb([[1, pb([[1, key20], [2, "Lab:bob"], [3, "Lab"], [6, 1], [7, 300]])], [3, 1]]);
+let cuts = 0;
+for (let n = 0; n < whole.length; n++) {
+    try {
+        Migration.parse(migrationLink(whole.slice(0, n)));
+        cuts++;
+    } catch (e) {
+        check(false, "cut at " + n + " threw " + e);
+    }
+}
+eq(cuts, whole.length, "every cut handled");
+
+// Our export, read back: random accounts in every shape that fits.
+const exported = [];
+const exportedKeys = {};
+for (let i = 0; i < 37; i++) {
+    const a = { id: "x" + i, type: i % 5 === 0 ? "hotp" : "totp", issuer: i % 3 === 0 ? "" : "Site " + i + " Zürich",
+                label: "user" + i + "@example.com", algorithm: ["SHA1", "SHA256", "SHA512"][i % 3],
+                digits: i % 2 ? 8 : 6, period: 30, counter: i % 5 === 0 ? i * 1000003 : 0 };
+    exported.push(a);
+    exportedKeys[a.id] = Array.from(crypto.randomBytes(10 + (i % 4) * 11));
+}
+exported.push({ id: "p60", type: "totp", issuer: "Slow", label: "x", algorithm: "SHA1", digits: 6, period: 60, counter: 0 });
+exported.push({ id: "d7", type: "totp", issuer: "Seven", label: "x", algorithm: "SHA1", digits: 7, period: 30, counter: 0 });
+exported.push({ id: "gone", type: "totp", issuer: "Gone", label: "x", algorithm: "SHA1", digits: 6, period: 30, counter: 0 });
+exportedKeys.p60 = key20;
+exportedKeys.d7 = key20;
+const out = Migration.compose(exported, (a) => exportedKeys[a.id], 777);
+eq(out.left.map((l) => l.account.id), ["p60", "d7", "gone"], "60 s, 7 digits and a missing key left out");
+check(/60 seconds/.test(out.left[0].reason) && /7 digits/.test(out.left[1].reason) && /missing/.test(out.left[2].reason),
+      "and why");
+check(out.links.length >= 4, "37 accounts in several codes: " + out.links.length);
+let back = [];
+out.links.forEach(function (l, index) {
+    check(l.link.length <= Migration.MAX_LINK_LENGTH || l.accounts.length === 1,
+          "code " + index + " is " + l.link.length + " characters");
+    check(l.accounts.length <= Migration.MAX_PER_CODE, "code " + index + " holds " + l.accounts.length);
+    check(/^otpauth-migration:\/\/offline\?data=[A-Za-z0-9%]+$/.test(l.link), "code " + index + " is escaped");
+    const p = Migration.parse(l.link);
+    eq([p.batchIndex, p.batchSize, p.batchId], [index, out.links.length, 777], "code " + index + "'s batch fields");
+    eq(p.entries.length, l.accounts.length, "code " + index + " holds what it says");
+    back = back.concat(p.entries.map((e) => e.account));
+});
+eq(back.length, 37, "every account read back");
+back.forEach(function (b, i) {
+    const a = exported[i];
+    eq(b, { type: a.type, issuer: a.issuer, label: a.label, secret: Base32.encode(exportedKeys[a.id]),
+            algorithm: a.algorithm, digits: a.digits, period: 30, counter: a.counter }, "account " + i + " back");
+});
+// A name without a site goes as the name; a site without a name as the name too.
+r = Migration.parse(Migration.compose([{ id: "s", type: "totp", issuer: "OnlySite", label: "", algorithm: "SHA1",
+                                         digits: 6, period: 30, counter: 0 }], () => key20, 1).links[0].link);
+eq([r.entries[0].account.issuer, r.entries[0].account.label], ["OnlySite", "OnlySite"], "a site without a name");
+// One very long account still goes, in a code of its own.
+const long = { id: "l", type: "totp", issuer: "L".repeat(300), label: "n".repeat(300), algorithm: "SHA1", digits: 6,
+               period: 30, counter: 0 };
+const lo = Migration.compose([long, exported[1]], (a) => a.id === "l" ? key20 : exportedKeys[a.id], 1);
+eq(lo.links.map((l) => l.accounts.length), [1, 1], "a long account in a code of its own");
+eq(Migration.compose([], () => key20).links, [], "nothing to export");
+// Small accounts: the length would let more in, the count does not.
+const tiny = [];
+for (let i = 0; i < 25; i++)
+    tiny.push({ id: "t" + i, type: "totp", issuer: "", label: "t" + i, algorithm: "SHA1", digits: 6, period: 30, counter: 0 });
+const tinyOut = Migration.compose(tiny, () => key20.slice(0, 10), 1);
+eq(tinyOut.links.map((l) => l.accounts.length), [10, 10, 5], "at most 10 accounts in a code");
+check(Migration.link(tiny.slice(0, 11).map((a) => Migration.accountBytes(a, key20.slice(0, 10))), 1000, 1000, 1).length
+      <= Migration.MAX_LINK_LENGTH, "and not for the length: 11 would fit");
+check(Migration.compose(exported.slice(0, 1), (a) => exportedKeys[a.id]).links[0].link !==
+      Migration.compose(exported.slice(0, 1), (a) => exportedKeys[a.id]).links[0].link, "a new batch id each export");
 
 console.log((failed === 0 ? "PASS" : "FAIL") + " node: " + passed + " passed, " + failed + " failed");
 process.exit(failed === 0 ? 0 : 1);

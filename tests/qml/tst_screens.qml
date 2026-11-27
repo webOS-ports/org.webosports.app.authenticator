@@ -9,6 +9,8 @@ import QtTest
 import LunaNext.Common 0.1
 
 import "../../qml/js/Accounts.js" as Accounts
+import "../../qml/js/Base32.js" as Base32
+import "../../qml/js/Migration.js" as Migration
 
 /*
  * Every screen of the app on one device's screen per run: the window is the
@@ -494,6 +496,92 @@ TestCase {
         tryVerify(function() { return dialog.visible; });
         onScreen(findChild(dialog, "confirmAcceptButton"), "Delete");
         shot("delete-from-editor");
+    }
+
+    // --- import and export ---------------------------------------------
+
+    // Another authenticator's export: new, already there, and one that
+    // cannot be used (MD5).
+    function test_import() {
+        makeKeymanager();
+        seedAccounts();
+        createApp();
+        var md5 = [];
+        Migration.writeBytes(md5, 1, Base32.decode(otherSecret));
+        Migration.writeBytes(md5, 2, Migration.utf8Encode("Old"));
+        Migration.writeNumber(md5, 4, 4);
+        var parts = [Migration.accountBytes(account("x", "Example", "alice@example.com"), Base32.decode(rfcSecret)),
+                     Migration.accountBytes(account("y", "A very long site name from another phone", "someone.else@example.com"),
+                                            Base32.decode(otherSecret)),
+                     md5,
+                     Migration.accountBytes(account("z", "Shop", "me", { type: "hotp", counter: 4 }), Base32.decode(rfcSecret))];
+        app.launchParams = JSON.stringify({ target: Migration.link(parts, 2, 0, 7) });
+        waitForPage("importPage");
+        onScreen(findChild(app.header, "importButton"), "Add");
+        onScreen(findChild(page(), "importExplanation"), "the explanation", true);
+        noSideways(flickableIn(page()), "the import");
+        for (var i = 0; i < 4; i++)
+            onScreen(findChild(page(), "importRow" + i), "row " + i, true);
+        shot("import");
+    }
+
+    function openExport() {
+        app.appMenu.popup(0, 0);
+        tryVerify(function() { return app.appMenu.opened; });
+        mouseClick(findChild(app.appMenu.contentItem, "exportMenuItem") || app.appMenu.itemAt(5));
+        waitForPage("exportPage");
+    }
+
+    // The QR code: square, all of it on the screen, as large as the room.
+    function codeFits(label) {
+        var qr = findChild(page(), "qrCode");
+        onScreen(qr, label);
+        verify(qr.valid, label + ": no code drawn (" + qr.error + "); luneos-components needs libqrencode");
+        compare(qr.width, qr.height);
+        verify(qr.width >= Math.min(app.width, app.height) * 0.45,
+               label + " is small: " + qr.width + " in " + app.width + "x" + app.height);
+        var caption = findChild(page(), "codeCaption");
+        onScreen(caption, label + ": the caption");
+        verify(caption.mapToItem(null, 0, caption.height).y <= qr.mapToItem(null, 0, 0).y + 0.5,
+               label + ": the caption runs into the code");
+    }
+
+    function test_export() {
+        makeKeymanager();
+        seedAccounts();
+        createApp();
+        openExport();
+        onScreen(findChild(app.header, "showCodesButton"), "Show codes");
+        onScreen(findChild(page(), "exportExplanation"), "the explanation", true);
+        noSideways(flickableIn(page()), "the export");
+        // Mail changes every 60 seconds: listed apart, with why.
+        onScreen(findChild(page(), "notExportableGroup"), "what cannot be exported", true);
+        shot("export");
+        mouseClick(findChild(app.header, "showCodesButton"));
+        tryCompare(page(), "step", "codes");
+        onScreen(findChild(app.header, "exportDoneButton"), "Done");
+        codeFits("the code");
+        // Read back from the picture by tests/js/read-qr-shots.js.
+        shot("export-code");
+    }
+
+    function test_export_several_codes() {
+        makeKeymanager();
+        var accounts = [], secrets = {};
+        for (var i = 0; i < 23; i++) {
+            accounts.push(account("e" + i, "Site number " + i, "user" + i + "@example.com"));
+            secrets["e" + i] = i % 2 ? rfcSecret : otherSecret;
+        }
+        seed(accounts, secrets);
+        createApp();
+        openExport();
+        mouseClick(findChild(app.header, "showCodesButton"));
+        tryCompare(page(), "step", "codes");
+        verify(page().codes.length > 1);
+        codeFits("the first code");
+        onScreen(findChild(page(), "nextCodeButton"), "Next");
+        onScreen(findChild(page(), "previousCodeButton"), "Previous");
+        shot("export-codes");
     }
 
     // --- the lock ------------------------------------------------------

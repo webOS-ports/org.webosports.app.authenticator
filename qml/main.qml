@@ -27,12 +27,15 @@ import LuneOS.Forms 1.0
 import LuneOS.Components 1.0
 
 import "js/OtpAuthUri.js" as OtpAuthUri
+import "js/Migration.js" as Migration
 
 /*
  * Authenticator: the one-time codes for signing in with two-step
  * verification, time-based (TOTP) and counter-based (HOTP). Accounts come
  * from an otpauth:// link - a QR code read by the Camera opens here - or
- * are typed in.
+ * are typed in, or come several at a time from another authenticator's
+ * export (otpauth-migration://, Google Authenticator's "Transfer
+ * accounts"). "Export accounts" shows them as such codes in turn.
  *
  * Locked (store.lockEnabled), it asks for a fingerprint or the screen lock
  * passcode when it starts, and again after relockAfterMs in the
@@ -59,7 +62,8 @@ AppWindow {
     property alias appMenu: appMenu
     // Says what went wrong, under the header, until dismissed.
     property string notice: ""
-    // An otpauth:// link that came before the accounts were read.
+    // An otpauth:// or otpauth-migration:// link that came before the
+    // accounts were read.
     property string pendingLink: ""
 
     // In front, not in the background; the tests set it themselves.
@@ -212,9 +216,10 @@ AppWindow {
     }
 
     /*
-     * {"target": "otpauth://..."}: the application manager opens such
-     * links here (appinfo.json's mimeTypes), from the Camera's QR reader or
-     * anywhere else. The account is shown to be added, not added unasked.
+     * {"target": "otpauth://..."} or {"target": "otpauth-migration://..."}:
+     * the application manager opens such links here (appinfo.json's
+     * mimeTypes), from the Camera's QR reader or anywhere else. The
+     * accounts are shown to be added, not added unasked.
      */
     LaunchParams {
         window: appWindow
@@ -229,12 +234,17 @@ AppWindow {
     }
 
     function openLink(link) {
-        if (!OtpAuthUri.isOtpAuth(link)) {
-            notice = "Authenticator only opens otpauth:// links.";
+        var migration = Migration.isMigration(link);
+        if (!OtpAuthUri.isOtpAuth(link) && !migration) {
+            notice = "Authenticator only opens otpauth:// and otpauth-migration:// links.";
             return;
         }
         if (accountStore.status === "loading" || locked) {
             pendingLink = link;
+            return;
+        }
+        if (migration) {
+            openImport(link);
             return;
         }
         var parsed = OtpAuthUri.parse(link);
@@ -243,6 +253,24 @@ AppWindow {
             return;
         }
         openEditor({ "prefill": parsed.account, "fromLink": true });
+    }
+
+    // Another authenticator's export: its accounts, to be added together.
+    function openImport(link) {
+        var parsed = Migration.parse(link);
+        if (parsed.error) {
+            notice = parsed.error;
+            return;
+        }
+        pageStack.pop(null);
+        pageStack.push(Qt.resolvedUrl("ImportPage.qml"), { "entries": parsed.entries,
+                                                           "batchIndex": parsed.batchIndex,
+                                                           "batchSize": parsed.batchSize });
+    }
+
+    function openExport() {
+        pageStack.pop(null);
+        pageStack.push(Qt.resolvedUrl("ExportPage.qml"));
     }
 
     function openEditor(properties) {
@@ -302,6 +330,13 @@ AppWindow {
             height: visible ? implicitHeight : 0
             enabled: accountStore.status === "ready"
             onTriggered: appWindow.toggleFace()
+        }
+        // The accounts as QR codes, for another phone.
+        MenuItem {
+            objectName: "exportMenuItem"
+            text: "Export accounts"
+            enabled: accountStore.status === "ready" && accountStore.accounts.length > 0
+            onTriggered: appWindow.openExport()
         }
     }
 
